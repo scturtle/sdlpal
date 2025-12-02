@@ -14,39 +14,21 @@
  * 
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  *
  * rix.cpp - Softstar RIX OPL Format Player by palxex <palxex.ys168.com>
  *                                             BSPAL <BSPAL.ys168.com>
  */
-#include "../common.h"
 
 #include <cstring>
-#include <cstdio>
-#include <cstdlib>
+#include <stdint.h>
 #include "rix.h"
 
-using namespace std;
+#define AdPlug_LogWrite(...)
 
-#if defined(__hppa__) || \
-   defined(__m68k__) || defined(mc68000) || defined(_M_M68K) || \
-   (defined(__MIPS__) && defined(__MISPEB__)) || \
-   defined(__ppc__) || defined(__POWERPC__) || defined(_M_PPC) || \
-   defined(__sparc__)
-   // big endian
-   #define RIX_SWAP32(a) (((a) << 24) | (((a) << 8) & 0x00FF0000) | (((a) >> 8) & 0x0000FF00) | ((a) >> 24))
-   #define RIX_SWAP16(a) ((((a) << 8) & 0xFF00)  | ((a) >> 8))
-#else
-   // little endian
-   #define RIX_SWAP32(a) (a)
-   #define RIX_SWAP16(a) (a)
-#endif
-
-#ifdef DEBUG
-#define RELEASE_INLINE
-#else
-#define RELEASE_INLINE inline
-#endif
+#define RIX_GET32(p, i) \
+  ((uint32_t)p[4*i] | (uint32_t)p[4*i+1] << 8 | \
+   (uint32_t)p[4*i+2] << 16 | (uint32_t)p[4*i + 3] << 24)
 
 const uint8_t CrixPlayer::adflag[] = {0,0,0,1,1,1,0,0,0,1,1,1,0,0,0,1,1,1};
 const uint8_t CrixPlayer::reg_data[] = {0,1,2,3,4,5,8,9,10,11,12,13,16,17,18,19,20,21};
@@ -66,10 +48,7 @@ const uint8_t CrixPlayer::bd_reg_data[] = {
   0x0F,0x0B,0x00,0x05,0x05,0x00,0x00,0x00,0x00,0x00,0x00,
   0x00,0x01,0x00,0x0F,0x0B,0x00,0x07,0x05,0x00,0x00,0x00,
   0x00,0x00,0x00};
-uint8_t CrixPlayer::for40reg[] = {0x7F,0x7F,0x7F,0x7F,0x7F,0x7F,0x7F,0x7F,0x7F,
-					0x7F,0x7F,0x7F,0x7F,0x7F,0x7F,0x7F,0x7F,0x7F};
 const uint16_t CrixPlayer::mus_time = 0x4268;
-
 
 /*** public methods *************************************/
 
@@ -79,101 +58,35 @@ CPlayer *CrixPlayer::factory(Copl *newopl)
 }
 
 CrixPlayer::CrixPlayer(Copl *newopl)
-  : CPlayer(newopl), flag_mkf(0)
-#if USE_RIX_EXTRA_INIT
-	, extra_regs(NULL), extra_vals(NULL), extra_length(0)
-#endif
-#ifdef USE_RIX_MKF_FILE_BUFFER
-    , file_buffer(0)
-#endif
-    , fp(NULL), rix_buf(0)
+  : CPlayer(newopl), flag_mkf(0), file_buffer(0), rix_buf(0)
 {
 }
 
 CrixPlayer::~CrixPlayer()
 {
-#ifdef USE_RIX_MKF_FILE_BUFFER
-    if (file_buffer)
-        delete[] file_buffer;
-#else
-  fclose(fp);
-  if(rix_buf)
-    free(rix_buf);
-#endif
-#if USE_RIX_EXTRA_INIT
-  if (extra_regs) delete[] extra_regs;
-  if (extra_vals) delete[] extra_vals;
-#endif
+  if(file_buffer)
+    delete [] file_buffer;
 }
 
-#if USE_RIX_EXTRA_INIT
-void CrixPlayer::set_extra_init(uint32_t* regs, uint8_t* datas, int n)
+bool CrixPlayer::load(const std::string &filename, const CFileProvider &fp)
 {
-	extra_length = n;
-	if (extra_regs) delete[] extra_regs;
-	if (extra_vals) delete[] extra_vals;
+  binistream *f = fp.open(filename); if(!f) return false;
 
-	if (n > 0)
-	{
-		extra_regs = new uint32_t[n];
-		extra_vals = new uint8_t[n];
-		if (extra_regs) memcpy(extra_regs, regs, n * sizeof(uint32_t));
-		if (extra_vals) memcpy(extra_vals, datas, n * sizeof(uint8_t));
-	}
-	else
-	{
-		extra_regs = NULL;
-		extra_vals = NULL;
-	}
-}
-#endif
-
-void CrixPlayer::read_file_to(uint8_t *&buf) {
-    fseek(fp, 0, SEEK_END);
-    length = (uint32_t)ftell(fp);
-    if (buf)
-        free(buf);
-    buf = (uint8_t*)calloc(1, length);
-    fseek(fp, 0, SEEK_SET);
-    fread(buf, length, 1, fp);
-    return;
-}
-
-bool CrixPlayer::load(const std::string &filename, const CFileProvider &cfp)
-{
-  fp = fopen(filename.c_str(),"rb"); if(!fp) return false;
-
-  if(SDL_strcasecmp(filename.substr(filename.length()-4,4).c_str(),".mkf")==0)
+  if (fp.extension(filename, ".mkf"))
   {
 	  flag_mkf=1;
-	  fseek(fp,0,SEEK_SET);
-      int offset;
-      fread(&offset,4,1,fp);
-	  fseek(fp,RIX_SWAP32(offset),SEEK_SET);
+	  f->seek(0);
+	  int offset=f->readInt(4);
+	  f->seek(offset);
   }
-  uint16_t signature;
-  fread(&signature,2,1,fp);
-  if(RIX_SWAP16(signature)!=0x55aa){ fclose(fp);return false; }
-    if(!flag_mkf)
-    {
-        read_file_to(rix_buf);
-        subsongs = 1;
-#ifdef USE_RIX_MKF_FILE_BUFFER
-        file_buffer = rix_buf;
-        fclose(fp);
-#endif
-    }
-    else
-    {
-        fseek(fp, 0, SEEK_SET);
-        fread(&subsongs, 4, 1, fp);
-        subsongs = RIX_SWAP32(subsongs);
-        subsongs /= 4;
-#ifdef USE_RIX_MKF_FILE_BUFFER
-        read_file_to(file_buffer);
-        fclose(fp);
-#endif
-    }
+  if(f->readInt(2)!=0x55aa){ fp.close(f);return false; }
+  length = pos = fp.filesize(f);
+  file_buffer = new uint8_t[length];
+  f->seek(0);
+  f->readString((char *)file_buffer, length);
+  fp.close(f);
+  if(!flag_mkf)
+	  rix_buf=file_buffer;
   rewind(0);
   return true;
 }
@@ -183,79 +96,68 @@ bool CrixPlayer::update()
 	int_08h_entry();
 	return !play_end;
 }
+
+unsigned int CrixPlayer::getsubsong()
+{
+  return song;
+}
+
 void CrixPlayer::rewind(int subsong)
 {
-    rewindReInit(subsong, true);
-}
-void CrixPlayer::rewindReInit(int subsong, bool reinit)
-{
-	play_end = 0;
-	pos = 0;
+  song = subsong;
+  I = 0; T = 0;
+  mus_block = 0;
+  ins_block = 0;
+  rhythm = 0;
+  music_on = 0;
+  pause_flag = 0;
+  band = 0;
+  band_low = 0;
+  e0_reg_flag = 0;
+  bd_modify = 0;
+  sustain = 0;
+  play_end = 0;
+  index = 0; 
 
-	if (reinit)
-	{
-		I = 0; T = 0;
-		mus_block = 0;
-		ins_block = 0;
-		rhythm = 0;
-		music_on = 0;
-		pause_flag = 0;
-		band = 0;
-		band_low = 0;
-		e0_reg_flag = 0;
-		bd_modify = 0;
-		sustain = 0;
+  memset(f_buffer,   0,     sizeof(f_buffer));
+  memset(a0b0_data2, 0,     sizeof(a0b0_data2));
+  memset(a0b0_data3, 0,     sizeof(a0b0_data3));
+  memset(a0b0_data4, 0,     sizeof(a0b0_data4));
+  memset(a0b0_data5, 0,     sizeof(a0b0_data5));
+  memset(addrs_head, 0,     sizeof(addrs_head));
+  memset(insbuf,     0,     sizeof(insbuf));
+  memset(displace,   0,     sizeof(displace));
+  memset(reg_bufs,   0,     sizeof(reg_bufs));
+  memset(for40reg,   0x7F,  sizeof(for40reg));
 
-		memset(f_buffer, 0, sizeof(f_buffer));
-		memset(a0b0_data2, 0, sizeof(a0b0_data2));
-		memset(a0b0_data3, 0, sizeof(a0b0_data3));
-		memset(a0b0_data4, 0, sizeof(a0b0_data4));
-		memset(a0b0_data5, 0, sizeof(a0b0_data5));
-		memset(addrs_head, 0, sizeof(addrs_head));
-		memset(insbuf, 0, sizeof(insbuf));
-		memset(displace, 0, sizeof(displace));
-		memset(reg_bufs, 0, sizeof(reg_bufs));
-		memset(for40reg, 0x7F, sizeof(for40reg));
-	}
-
-	if (flag_mkf)
-	{
-        int index,index2;
-#ifdef USE_RIX_MKF_FILE_BUFFER
-        uint32_t* buf_index = (uint32_t*)file_buffer;
-        int offset1 = RIX_SWAP32(buf_index[subsong]), offset2;
-        while ((offset2 = RIX_SWAP32(buf_index[++subsong])) == offset1);
-        length = offset2 - offset1 + 1;
-        rix_buf = file_buffer + offset1;
-#else
-        fseek(fp,subsong*4,SEEK_SET);
-        fread(&index,4,1,fp);
-        fread(&index2,4,1,fp);
-        index = RIX_SWAP32(index);
-        index2 = RIX_SWAP32(index2);
-        length = index2 - index;
-        if(length==0) return;
-        fseek(fp,index,SEEK_SET);
-        if(rix_buf)
-            free(rix_buf);
-        rix_buf = (uint8_t *)calloc(1, length);
-        memset(rix_buf, 0, sizeof(rix_buf));
-        fread(rix_buf,length,1,fp);
-#endif
-	}
-
-	if (reinit)
-	{
-		opl->init();
-		opl->write(1, 32);	// go to OPL2 mode
-		set_new_int();
-		data_initial();
-	}
+  if (flag_mkf && subsong >= 0)
+  {
+    // NOTE(scturtle): fix offset at here
+    uint32_t* buf_index = (uint32_t*)file_buffer;
+    int offset = buf_index[subsong];
+    int next = buf_index[subsong + 1];
+    rix_buf = file_buffer + offset;
+    length = next - offset;
+  }
+  opl->init();
+  opl->write(1,32);	// go to OPL2 mode
+  set_new_int();
+  data_initial();
 }
 
 unsigned int CrixPlayer::getsubsongs()
 {
-    return subsongs;
+	if(flag_mkf)
+	{
+		uint32_t songs = RIX_GET32(file_buffer, 0) / 4;
+		for (uint32_t i = songs-1; i > 0; i--)
+			if (RIX_GET32(file_buffer, i) ==
+			    RIX_GET32(file_buffer, i-1))
+				songs--;
+		return songs;
+	}
+	else
+		return 1;
 }
 
 float CrixPlayer::getrefresh()
@@ -264,13 +166,13 @@ float CrixPlayer::getrefresh()
 }
 
 /*------------------Implemention----------------------------*/
-RELEASE_INLINE void CrixPlayer::set_new_int()
+inline void CrixPlayer::set_new_int()
 {
 //   if(!ad_initial()) exit(1);
   ad_initial();
 }
 /*----------------------------------------------------------*/
-RELEASE_INLINE void CrixPlayer::Pause()
+inline void CrixPlayer::Pause()
 {
   uint16_t i;
   pause_flag = 1;
@@ -278,46 +180,36 @@ RELEASE_INLINE void CrixPlayer::Pause()
     switch_ad_bd(i);
 }
 /*----------------------------------------------------------*/
-RELEASE_INLINE void CrixPlayer::ad_a0b0l_reg_(uint16_t index,uint16_t p2,uint16_t p3)
+inline void CrixPlayer::ad_a0b0l_reg_(uint16_t index,uint16_t p2,uint16_t p3)
 {
 //   uint16_t i = p2+a0b0_data2[index];
   a0b0_data4[index] = p3;
   a0b0_data3[index] = p2;
 }
-RELEASE_INLINE void CrixPlayer::data_initial()
+inline void CrixPlayer::data_initial()
 {
-  rhythm = rix_buf[2];
-  mus_block = (rix_buf[0x0D]<<8)+rix_buf[0x0C];
-  ins_block = (rix_buf[0x09]<<8)+rix_buf[0x08];
-  I = mus_block+1;
+  if (0x0D < length)
+    {
+      rhythm = rix_buf[2];
+      mus_block = (rix_buf[0x0D] << 8) + rix_buf[0x0C];
+      ins_block = (rix_buf[0x09] << 8) + rix_buf[0x08];
+      I = mus_block + 1;
+    }
+  else I = mus_block = length; // file too short; will stop playing immediately
   if(rhythm != 0)
     {
-      ad_a0b0_reg(6);
-      ad_a0b0_reg(7);
-      ad_a0b0_reg(8);
+      //		ad_a0b0_reg(6);
+      //		ad_a0b0_reg(7);
+      //		ad_a0b0_reg(8);
       ad_a0b0l_reg_(8,0x18,0);
       ad_a0b0l_reg_(7,0x1F,0);
-
-	  // This is required for correct attack effect, by louyihua
-#if USE_RIX_EXTRA_INIT
-	  if (extra_regs && extra_vals && extra_length > 0)
-	  {
-		  for (uint32_t i = 0; i < extra_length; i++)
-			  opl->write(extra_regs[i], extra_vals[i]);
-	  }
-#else
-	  opl->write(0xa8, 87);
-	  opl->write(0xb8, 9);
-	  opl->write(0xa7, 3);
-	  opl->write(0xb7, 15/*10*/);	// Changed from 10 (original value) to 15 for better quality
-#endif
-  }
+    }
   bd_modify = 0;
-  ad_bd_reg();
+  //	ad_bd_reg();
   band = 0; music_on = 1;
 }
 /*----------------------------------------------------------*/
-RELEASE_INLINE uint16_t CrixPlayer::ad_initial()
+inline uint16_t CrixPlayer::ad_initial()
 {
   uint16_t i,j,k = 0;
   for(i=0;i<25;i++) 
@@ -337,23 +229,23 @@ RELEASE_INLINE uint16_t CrixPlayer::ad_initial()
 			addrs_head[k] = j;
 			k++;
       }
-  ad_bd_reg();
-  ad_08_reg();
-  for(i=0;i<9;i++) ad_a0b0_reg(i);
+  //ad_bd_reg();
+  //ad_08_reg();
+  //for(i=0;i<9;i++) ad_a0b0_reg(i);
   e0_reg_flag = 0x20;
-  for(i=0;i<18;i++) ad_bop(0xE0+reg_data[i],0);
-  ad_bop(1,e0_reg_flag);
+  //for(i=0;i<18;i++) ad_bop(0xE0+reg_data[i],0);
+  //ad_bop(1,e0_reg_flag);
   return 1;//ad_test();
 }
 /*----------------------------------------------------------*/
-RELEASE_INLINE void CrixPlayer::ad_bop(uint16_t reg,uint16_t value)
+inline void CrixPlayer::ad_bop(uint16_t reg,uint16_t value)
 {
-  //if(reg == 2 || reg == 3)
-  //  AdPlug_LogWrite("switch OPL2/3 mode!\n");
+  if(reg == 2 || reg == 3)
+    AdPlug_LogWrite("switch OPL2/3 mode!\n");
   opl->write(reg & 0xff, value & 0xff);
 }
 /*--------------------------------------------------------------*/
-RELEASE_INLINE void CrixPlayer::int_08h_entry()
+inline void CrixPlayer::int_08h_entry()   
   {   
     uint16_t band_sus = 1;   
     while(band_sus)   
@@ -376,12 +268,12 @@ RELEASE_INLINE void CrixPlayer::int_08h_entry()
       }   
   }   
 /*--------------------------------------------------------------*/ 
-RELEASE_INLINE uint16_t CrixPlayer::rix_proc()
+inline uint16_t CrixPlayer::rix_proc()
 {
   uint8_t ctrl = 0;
   if(music_on == 0||pause_flag == 1) return 0;
   band = 0;
-  while(rix_buf[I] != 0x80 && I<length-1)
+  while (I < length && rix_buf[I] != 0x80)
     {
       band_low = rix_buf[I-1];
       ctrl = rix_buf[I]; I+=2;
@@ -403,8 +295,10 @@ RELEASE_INLINE uint16_t CrixPlayer::rix_proc()
   return 0;
 }
 /*--------------------------------------------------------------*/
-RELEASE_INLINE void CrixPlayer::rix_get_ins()
+inline void CrixPlayer::rix_get_ins()
 {
+  if (ins_block + (band_low << 6) + sizeof(insbuf) >= length) return;
+
   int		i;
   uint8_t	*baddr = (&rix_buf[ins_block])+(band_low<<6);
 
@@ -412,8 +306,9 @@ RELEASE_INLINE void CrixPlayer::rix_get_ins()
     insbuf[i] = (baddr[i * 2 + 1] << 8) + baddr[i * 2];
 }
 /*--------------------------------------------------------------*/
-RELEASE_INLINE void CrixPlayer::rix_90_pro(uint16_t ctrl_l)
+inline void CrixPlayer::rix_90_pro(uint16_t ctrl_l)
 {
+  if (ctrl_l >= 11) return; // modify[] has size 28
   if(rhythm == 0 || ctrl_l < 6)
     {
       ins_to_reg(modify[ctrl_l*2],insbuf,insbuf[26]);
@@ -425,7 +320,7 @@ RELEASE_INLINE void CrixPlayer::rix_90_pro(uint16_t ctrl_l)
 		  ins_to_reg(modify[ctrl_l*2+6],insbuf,insbuf[26]);
 		  return;
 		}
-  else
+  else // same effect as 1st case, no need to handle separately
 		{
 		  ins_to_reg(12,insbuf,insbuf[26]);
 		  ins_to_reg(15,insbuf+13,insbuf[27]);
@@ -433,7 +328,7 @@ RELEASE_INLINE void CrixPlayer::rix_90_pro(uint16_t ctrl_l)
 		}
 }
 /*--------------------------------------------------------------*/
-RELEASE_INLINE void CrixPlayer::rix_A0_pro(uint16_t ctrl_l,uint16_t index)
+inline void CrixPlayer::rix_A0_pro(uint16_t ctrl_l,uint16_t index)
 {
   if(rhythm == 0 || ctrl_l <= 6)
     {
@@ -443,11 +338,12 @@ RELEASE_INLINE void CrixPlayer::rix_A0_pro(uint16_t ctrl_l,uint16_t index)
   else return;
 }
 /*--------------------------------------------------------------*/
-RELEASE_INLINE void CrixPlayer::prepare_a0b0(uint16_t index,uint16_t v)  /* important !*/
+inline void CrixPlayer::prepare_a0b0(uint16_t index,uint16_t v)  /* important !*/
 {
+  if (index >= 11) return;
   short high = 0,low = 0; uint32_t res;
   int res1 = (v-0x2000)*0x19;
-  if(res1 == (int)0xff) return;
+  if(res1 == (int)0xff) return; // impossible
   low = res1/0x2000;
   if(low < 0)
     {
@@ -473,21 +369,23 @@ RELEASE_INLINE void CrixPlayer::prepare_a0b0(uint16_t index,uint16_t v)  /* impo
   displace[index] = low;
 }
 /*--------------------------------------------------------------*/
-RELEASE_INLINE void CrixPlayer::ad_a0b0l_reg(uint16_t index,uint16_t p2,uint16_t p3)
+inline void CrixPlayer::ad_a0b0l_reg(uint16_t index,uint16_t p2,uint16_t p3)
 {
+  if (index >= 11) return;
   uint16_t data; uint16_t i = p2+a0b0_data2[index];
   a0b0_data4[index] = p3;
   a0b0_data3[index] = p2;
   i = ((signed short)i<=0x5F?i:0x5F);
   i = ((signed short)i>=0?i:0);
-  data = f_buffer[addrs_head[i]+displace[index]/2];
+  data = f_buffer[addrs_head[i]+displace[index]/2]; // sum <= 11+24*24/2 < 300
   ad_bop(0xA0+index,data);
   data = a0b0_data5[i]*4+(p3<1?0:0x20)+((data>>8)&3);
   ad_bop(0xB0+index,data);
 }
 /*--------------------------------------------------------------*/
-RELEASE_INLINE void CrixPlayer::rix_B0_pro(uint16_t ctrl_l,uint16_t index)
+inline void CrixPlayer::rix_B0_pro(uint16_t ctrl_l,uint16_t index)
 {
+  if (ctrl_l >= 11) return;
   int temp = 0;
   if(rhythm == 0 || ctrl_l < 6) temp = modify[ctrl_l*2+1];
   else
@@ -499,7 +397,7 @@ RELEASE_INLINE void CrixPlayer::rix_B0_pro(uint16_t ctrl_l,uint16_t index)
   ad_40_reg(temp);
 }
 /*--------------------------------------------------------------*/
-RELEASE_INLINE void CrixPlayer::rix_C0_pro(uint16_t ctrl_l,uint16_t index)
+inline void CrixPlayer::rix_C0_pro(uint16_t ctrl_l,uint16_t index)
 {
   uint16_t i = index>=12?index-12:0;
   if(ctrl_l < 6 || rhythm == 0)
@@ -524,7 +422,7 @@ RELEASE_INLINE void CrixPlayer::rix_C0_pro(uint16_t ctrl_l,uint16_t index)
     }
 }
 /*--------------------------------------------------------------*/
-RELEASE_INLINE void CrixPlayer::switch_ad_bd(uint16_t index)
+inline void CrixPlayer::switch_ad_bd(uint16_t index)
 {
 
   if(rhythm == 0 || index < 6) ad_a0b0l_reg(index,a0b0_data3[index],0);
@@ -535,7 +433,7 @@ RELEASE_INLINE void CrixPlayer::switch_ad_bd(uint16_t index)
     }
 }
 /*--------------------------------------------------------------*/
-RELEASE_INLINE void CrixPlayer::ins_to_reg(uint16_t index,uint16_t* insb,uint16_t value)
+inline void CrixPlayer::ins_to_reg(uint16_t index,uint16_t* insb,uint16_t value)
 {
   uint16_t i;
   for(i=0;i<13;i++) reg_bufs[index].v[i] = insb[i];
@@ -545,13 +443,13 @@ RELEASE_INLINE void CrixPlayer::ins_to_reg(uint16_t index,uint16_t* insb,uint16_
     ad_80_reg(index),ad_20_reg(index),ad_E0_reg(index);
 }
 /*--------------------------------------------------------------*/
-RELEASE_INLINE void CrixPlayer::ad_E0_reg(uint16_t index)
+inline void CrixPlayer::ad_E0_reg(uint16_t index)
 {
   uint16_t data = e0_reg_flag == 0?0:(reg_bufs[index].v[13]&3);
   ad_bop(0xE0+reg_data[index],data);
 }
 /*--------------------------------------------------------------*/
-RELEASE_INLINE void CrixPlayer::ad_20_reg(uint16_t index)
+inline void CrixPlayer::ad_20_reg(uint16_t index)
 {
   uint16_t data = (reg_bufs[index].v[9] < 1?0:0x80);
   data += (reg_bufs[index].v[10] < 1?0:0x40);
@@ -561,21 +459,21 @@ RELEASE_INLINE void CrixPlayer::ad_20_reg(uint16_t index)
   ad_bop(0x20+reg_data[index],data);
 }
 /*--------------------------------------------------------------*/
-RELEASE_INLINE void CrixPlayer::ad_80_reg(uint16_t index)
+inline void CrixPlayer::ad_80_reg(uint16_t index)
 {
   uint16_t data = (reg_bufs[index].v[7]&0x0F),temp = reg_bufs[index].v[4];
   data |= (temp << 4);
   ad_bop(0x80+reg_data[index],data);
 }
 /*--------------------------------------------------------------*/
-void CrixPlayer::ad_60_reg(uint16_t index)
+inline void CrixPlayer::ad_60_reg(uint16_t index)
 {
   uint16_t data = reg_bufs[index].v[6]&0x0F,temp = reg_bufs[index].v[3];
   data |= (temp << 4);
   ad_bop(0x60+reg_data[index],data);
 }
 /*--------------------------------------------------------------*/
-RELEASE_INLINE void CrixPlayer::ad_C0_reg(uint16_t index)
+inline void CrixPlayer::ad_C0_reg(uint16_t index)
 {
   uint16_t data = reg_bufs[index].v[2];
   if(adflag[index] == 1) return;
@@ -584,7 +482,7 @@ RELEASE_INLINE void CrixPlayer::ad_C0_reg(uint16_t index)
   ad_bop(0xC0+ad_C0_offs[index],data);
 }
 /*--------------------------------------------------------------*/
-RELEASE_INLINE void CrixPlayer::ad_40_reg(uint16_t index)
+inline void CrixPlayer::ad_40_reg(uint16_t index)
 {
   uint32_t res = 0;
   uint16_t data = 0,temp = reg_bufs[index].v[0];
@@ -600,20 +498,20 @@ RELEASE_INLINE void CrixPlayer::ad_40_reg(uint16_t index)
   ad_bop(0x40+reg_data[index],data);
 }
 /*--------------------------------------------------------------*/
-RELEASE_INLINE void CrixPlayer::ad_bd_reg()
+inline void CrixPlayer::ad_bd_reg()
 {
   uint16_t data = rhythm < 1? 0:0x20;
   data |= bd_modify;
   ad_bop(0xBD,data);
 }
 /*--------------------------------------------------------------*/
-RELEASE_INLINE void CrixPlayer::ad_a0b0_reg(uint16_t index)
+inline void CrixPlayer::ad_a0b0_reg(uint16_t index)
 {
   ad_bop(0xA0+index,0);
   ad_bop(0xB0+index,0);
 }
 /*--------------------------------------------------------------*/
-RELEASE_INLINE void CrixPlayer::music_ctrl()
+inline void CrixPlayer::music_ctrl()
 {
   int i;
   for(i=0;i<11;i++)

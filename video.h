@@ -24,138 +24,49 @@
 
 #include "common.h"
 
-#define TOUCHOVERLAY_ALPHAMOD           120
-
-#define VIDEO_CopySurface(s, sr, t, tr) SDL_BlitSurface((s), (sr), (t), (tr))
-#define VIDEO_CopyEntireSurface(s, t)   SDL_BlitSurface((s), NULL, (t), NULL)
-#define VIDEO_BackupScreen(s)           SDL_BlitSurface((s), NULL, gpScreenBak, NULL)
-#define VIDEO_RestoreScreen(t)          SDL_BlitSurface(gpScreenBak, NULL, (t), NULL)
-#define VIDEO_FreeSurface(s)            SDL_FreeSurface(s)
-
 PAL_C_LINKAGE_BEGIN
+
+VOID VIDEO_CopySurface(SDL_Surface *s, const SDL_Rect *sr, SDL_Surface *t, const SDL_Rect *tr);
+VOID VIDEO_CopyEntireSurface(SDL_Surface *s, SDL_Surface *t);
+VOID VIDEO_BackupScreen(SDL_Surface *s);
+VOID VIDEO_RestoreScreen(SDL_Surface *t);
+VOID VIDEO_FreeSurface(SDL_Surface *s);
+VOID VIDEO_FillScreenBlack();
+
+// Blit an uncompressed bitmap in FBP.MKF to an SDL surface. Assume surface is a 8-bit 320x200 one.
+INT VIDEO_FBPBlitToSurface(LPBYTE lpBitmapFBP, SDL_Surface *lpDstSurface);
 
 extern SDL_Surface *gpScreen;
 extern SDL_Surface *gpScreenBak;
 extern volatile BOOL g_bRenderPaused;
 
-#if PAL_HAS_GLSL
-void Filter_StepParamSlot(int step);
-void Filter_StepCurrentParam(int step);
-#endif
+INT VIDEO_Startup(VOID);
 
-INT
-VIDEO_Startup(
-   VOID
-);
+VOID VIDEO_Shutdown(VOID);
 
-VOID
-VIDEO_Shutdown(
-   VOID
-);
+VOID VIDEO_UpdateScreen(const SDL_Rect *lpRect);
 
-VOID
-VIDEO_UpdateScreen(
-   const SDL_Rect  *lpRect
-);
+VOID VIDEO_SetPalette(SDL_Color rgPalette[256]);
 
-VOID
-VIDEO_SetPalette(
-   SDL_Color        rgPalette[256]
-);
+SDL_Color *VIDEO_GetPalette(VOID);
 
-VOID
-VIDEO_Resize(
-   INT             w,
-   INT             h
-);
+VOID VIDEO_ToggleFullscreen(VOID);
 
-SDL_Color *
-VIDEO_GetPalette(
-   VOID
-);
+VOID VIDEO_ShakeScreen(WORD wShakeTime, WORD wShakeLevel);
 
-VOID
-VIDEO_ToggleFullscreen(
-   VOID
-);
+VOID VIDEO_SwitchScreen(WORD wSpeed);
 
-VOID
-VIDEO_ChangeDepth(
-   INT             bpp
-);
+VOID VIDEO_FadeScreen(WORD wSpeed);
 
-VOID
-VIDEO_SaveScreenshot(
-   VOID
-);
+void VIDEO_SetWindowTitle(const char *pszTitle);
 
-VOID
-VIDEO_ShakeScreen(
-   WORD           wShakeTime,
-   WORD           wShakeLevel
-);
+SDL_Surface *VIDEO_CreateCompatibleSurface(SDL_Surface *pSource);
 
-VOID
-VIDEO_SwitchScreen(
-   WORD           wSpeed
-);
+SDL_Surface *VIDEO_CreateCompatibleSizedSurface(SDL_Surface *pSource, const SDL_Rect *pSize);
 
-VOID
-VIDEO_FadeScreen(
-   WORD           wSpeed
-);
+VOID VIDEO_DrawSurfaceToScreen(SDL_Surface *pSurface);
 
-void
-VIDEO_SetWindowTitle(
-	const char*   pszTitle
-);
-
-SDL_Surface *
-VIDEO_DuplicateSurface(
-	SDL_Surface    *pSource,
-	const SDL_Rect *pRect
-);
-
-SDL_Surface *
-VIDEO_CreateCompatibleSurface(
-	SDL_Surface    *pSource
-);
-
-SDL_Surface *
-VIDEO_CreateCompatibleSizedSurface(
-	SDL_Surface    *pSource,
-	const SDL_Rect *pSize
-);
-
-void
-VIDEO_UpdateSurfacePalette(
-	SDL_Surface    *pSurface
-);
-
-VOID
-VIDEO_DrawSurfaceToScreen(
-    SDL_Surface    *pSurface
-);
-
-VOID
-VIDEO_RenderCopy(
-    VOID
-);
-
-VOID
-VIDEO_SetupTouchArea(
-    int window_w,
-    int window_h,
-    int draw_w,
-    int draw_h
-);
-
-#if SDL_VERSION_ATLEAST(3,0,0)
-SDL_ScaleMode
-VIDEO_GetScaleMode(
-	VOID
-);
-#endif
+VOID VIDEO_RenderCopy(VOID);
 
 PAL_C_LINKAGE_END
 

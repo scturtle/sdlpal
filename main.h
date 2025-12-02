@@ -22,41 +22,29 @@
 #ifndef MAIN_H
 #define MAIN_H
 
-#include "common.h"
-#include "util.h"
-#include "palcommon.h"
-#include "font.h"
-#include "global.h"
-#include "palcfg.h"
-#include "map.h"
-#include "res.h"
-#include "scene.h"
-#include "players.h"
 #include "audio.h"
-#include "video.h"
+#include "aviplay.h"
+#include "battle.h"
+#include "common.h"
+#include "fight.h"
+#include "global.h"
 #include "input.h"
+#include "menu.h"
+#include "map.h"
+#include "palcfg.h"
+#include "palette.h"
+#include "play.h"
+#include "rngplay.h"
+#include "scene.h"
+#include "script.h"
 #include "text.h"
 #include "ui.h"
-#include "uigame.h"
 #include "uibattle.h"
-#include "magicmenu.h"
-#include "itemmenu.h"
-#include "palette.h"
-#include "rngplay.h"
-#include "ending.h"
-#include "script.h"
-#include "battle.h"
-#include "fight.h"
-#include "play.h"
-#include "game.h"
-#include "midi.h"
-#include "aviplay.h"
+#include "video.h"
 
-VOID
-PAL_Shutdown(
-   int exit_code
-);
+#define FPS 10
+#define FRAME_TIME (1000 / FPS)
 
-extern char gExecutablePath[PAL_MAX_PATH];
+VOID PAL_Shutdown(int exit_code);
 
 #endif

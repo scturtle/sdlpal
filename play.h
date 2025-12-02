@@ -26,35 +26,17 @@
 
 PAL_C_LINKAGE_BEGIN
 
-VOID
-PAL_GameUpdate(
-   BOOL       fTrigger
-);
+VOID PAL_GameUpdate(BOOL fTrigger);
 
-VOID
-PAL_GameUseItem(
-   VOID
-);
+VOID PAL_GameUseItem(VOID);
 
-VOID
-PAL_GameEquipItem(
-   VOID
-);
+VOID PAL_GameEquipItem(VOID);
 
-VOID
-PAL_StartFrame(
-   VOID
-);
+VOID PAL_QuitGame(VOID);
 
-VOID
-PAL_WaitForKey(
-   WORD      wTimeOut
-);
+VOID PAL_StartFrame(VOID);
 
-VOID
-PAL_WaitForAnyKey(
-   WORD      wTimeOut
-);
+VOID PAL_WaitForAnyKey(WORD wTimeOut);
 
 PAL_C_LINKAGE_END
 

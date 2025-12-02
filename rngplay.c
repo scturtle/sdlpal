@@ -24,425 +24,186 @@
 
 #include "main.h"
 
-static INT
-PAL_RNGReadFrame(
-   LPBYTE          lpBuffer,
-   UINT            uiBufferSize,
-   UINT            uiRngNum,
-   UINT            uiFrameNum,
-   FILE           *fpRngMKF
-)
-/*++
-  Purpose:
+// Read a frame from a RNG animation.
+static INT PAL_RNGReadFrame(LPBYTE lpBuffer, UINT uiBufferSize, UINT uiRngNum, UINT uiFrameNum, FILE *fpRngMKF) {
+  if (lpBuffer == NULL || fpRngMKF == NULL || uiBufferSize == 0)
+    return -1;
 
-    Read a frame from a RNG animation.
+  // Get the total number of chunks.
+  UINT uiChunkCount = PAL_MKFGetChunkCount(fpRngMKF);
+  if (uiRngNum >= uiChunkCount)
+    return -1;
 
-  Parameters:
+  // Get the offset of the chunk.
+  fseek(fpRngMKF, 4 * uiRngNum, SEEK_SET);
+  UINT uiOffset = 0, uiNextOffset = 0;
+  PAL_fread(&uiOffset, sizeof(UINT), 1, fpRngMKF);
+  PAL_fread(&uiNextOffset, sizeof(UINT), 1, fpRngMKF);
 
-    [OUT] lpBuffer - pointer to the destination buffer.
+  // Get the length of the chunk.
+  INT nChunk = uiNextOffset - uiOffset;
+  if (nChunk == 0)
+    return -1;
 
-    [IN]  uiBufferSize - size of the destination buffer.
+  // Get the number of frames.
+  fseek(fpRngMKF, uiOffset, SEEK_SET);
+  UINT nFrames = 0;
+  PAL_fread(&nFrames, sizeof(UINT), 1, fpRngMKF);
+  nFrames = (nFrames - 4) / 4;
+  if (uiFrameNum >= nFrames)
+    return -1;
 
-    [IN]  uiRngNum - the number of the RNG animation in the MKF archive.
+  // Get the offset of the frame.
+  fseek(fpRngMKF, uiOffset + 4 * uiFrameNum, SEEK_SET);
+  UINT frameOffset = 0, nextFrameOffset = 0;
+  PAL_fread(&frameOffset, sizeof(UINT), 1, fpRngMKF);
+  PAL_fread(&nextFrameOffset, sizeof(UINT), 1, fpRngMKF);
 
-    [IN]  uiFrameNum - frame number in the RNG animation.
+  // Get the length of the frame.
+  int frameLen = nextFrameOffset - frameOffset;
+  if ((UINT)frameLen > uiBufferSize)
+    return -2;
+  if (frameLen == 0)
+    return -1;
 
-    [IN]  fpRngMKF - pointer to the fopen'ed MKF file.
-
-  Return value:
-
-    Integer value which indicates the size of the chunk.
-    -1 if there are error in parameters.
-    -2 if buffer size is not enough.
-
---*/
-{
-   UINT         uiOffset       = 0;
-   UINT         uiSubOffset    = 0;
-   UINT         uiNextOffset   = 0;
-   UINT         uiChunkCount   = 0;
-   INT          iChunkLen      = 0;
-
-   if (lpBuffer == NULL || fpRngMKF == NULL || uiBufferSize == 0)
-   {
-      return -1;
-   }
-
-   //
-   // Get the total number of chunks.
-   //
-   uiChunkCount = PAL_MKFGetChunkCount(fpRngMKF);
-   if (uiRngNum >= uiChunkCount)
-   {
-      return -1;
-   }
-
-   //
-   // Get the offset of the chunk.
-   //
-   fseek(fpRngMKF, 4 * uiRngNum, SEEK_SET);
-   PAL_fread(&uiOffset, sizeof(UINT), 1, fpRngMKF);
-   PAL_fread(&uiNextOffset, sizeof(UINT), 1, fpRngMKF);
-   uiOffset = SDL_SwapLE32(uiOffset);
-   uiNextOffset = SDL_SwapLE32(uiNextOffset);
-
-   //
-   // Get the length of the chunk.
-   //
-   iChunkLen = uiNextOffset - uiOffset;
-   if (iChunkLen != 0)
-   {
-      fseek(fpRngMKF, uiOffset, SEEK_SET);
-   }
-   else
-   {
-      return -1;
-   }
-
-   //
-   // Get the number of sub chunks.
-   //
-   PAL_fread(&uiChunkCount, sizeof(UINT), 1, fpRngMKF);
-   uiChunkCount = (SDL_SwapLE32(uiChunkCount) - 4) / 4;
-   if (uiFrameNum >= uiChunkCount)
-   {
-      return -1;
-   }
-
-   //
-   // Get the offset of the sub chunk.
-   //
-   fseek(fpRngMKF, uiOffset + 4 * uiFrameNum, SEEK_SET);
-   PAL_fread(&uiSubOffset, sizeof(UINT), 1, fpRngMKF);
-   PAL_fread(&uiNextOffset, sizeof(UINT), 1, fpRngMKF);
-   uiSubOffset = SDL_SwapLE32(uiSubOffset);
-   uiNextOffset = SDL_SwapLE32(uiNextOffset);
-
-   //
-   // Get the length of the sub chunk.
-   //
-   iChunkLen = uiNextOffset - uiSubOffset;
-   if ((UINT)iChunkLen > uiBufferSize)
-   {
-      return -2;
-   }
-
-   if (iChunkLen != 0)
-   {
-      fseek(fpRngMKF, uiOffset + uiSubOffset, SEEK_SET);
-      return (int)fread(lpBuffer, 1, iChunkLen, fpRngMKF);
-   }
-
-   return -1;
+  fseek(fpRngMKF, uiOffset + frameOffset, SEEK_SET);
+  return (int)fread(lpBuffer, 1, frameLen, fpRngMKF);
 }
 
-static INT
-PAL_RNGBlitToSurface(
-   const uint8_t   *rng,
-   int              length,
-   SDL_Surface     *lpDstSurface
-)
-/*++
-  Purpose:
+// Blit one frame in an RNG animation to an SDL surface.
+// The surface should contain the last frame of the RNG, or blank if it's the first frame.
+// NOTE: Assume the surface is already locked, and the surface is a 320x200 8-bit one.
+static INT PAL_RNGBlitToSurface(const uint8_t *rng, int length, SDL_Surface *lpDstSurface) {
 
-    Blit one frame in an RNG animation to an SDL surface.
-    The surface should contain the last frame of the RNG, or blank if it's the first
-    frame.
+  // Check for invalid parameters.
+  if (lpDstSurface == NULL || length < 0)
+    return -1;
 
-    NOTE: Assume the surface is already locked, and the surface is a 320x200 8-bit one.
+#define COPY_PIXEL                                                                                                     \
+  ((LPBYTE)(lpDstSurface->pixels))[(dst_ptr / 320) * lpDstSurface->pitch + (dst_ptr % 320)] = rng[ptr++], dst_ptr++;
 
-  Parameters:
+  // Draw the frame to the surface.
+  int ptr = 0;
+  int dst_ptr = 0;
+  while (ptr < length) {
+    uint8_t data = rng[ptr++];
+    uint16_t wdata;
+    switch (data) {
+    case 0x00:
+    case 0x13:
+      // End
+      return 0;
 
-    [IN]  rng - Pointer to the RNG data.
+    // 0x02-0x04: 跳过若干像素不绘制
+    case 0x02:
+      dst_ptr += 2;
+      break;
 
-    [IN]  length - Length of the RNG data.
+    case 0x03:
+      data = rng[ptr++];
+      dst_ptr += (data + 1) * 2;
+      break;
 
-    [OUT] lpDstSurface - pointer to the destination SDL surface.
+    case 0x04:
+      wdata = rng[ptr++];
+      wdata |= rng[ptr++] << 8;
+      dst_ptr += ((unsigned int)wdata + 1) * 2;
+      break;
 
-  Return value:
-
-    0 = success, -1 = error.
-
---*/
-{
-   int                   ptr         = 0;
-   int                   dst_ptr     = 0;
-   uint16_t              wdata       = 0;
-   int                   x, y, i, n;
-
-   //
-   // Check for invalid parameters.
-   //
-   if (lpDstSurface == NULL || length < 0)
-   {
-      return -1;
-   }
-
-   //
-   // Draw the frame to the surface.
-   // FIXME: Dirty and ineffective code, needs to be cleaned up
-   //
-   while (ptr < length)
-   {
-      uint8_t data = rng[ptr++];
-      switch (data)
-      {
-      case 0x00:
-      case 0x13:
-         //
-         // End
-         //
-         goto end;
-
-      case 0x02:
-         dst_ptr += 2;
-         break;
-
-      case 0x03:
-         data = rng[ptr++];
-         dst_ptr += (data + 1) * 2;
-         break;
-
-      case 0x04:
-         wdata = rng[ptr] | (rng[ptr + 1] << 8);
-         ptr += 2;
-         dst_ptr += ((unsigned int)wdata + 1) * 2;
-         break;
-
-      case 0x0a:
-         x = dst_ptr % 320;
-         y = dst_ptr / 320;
-         ((LPBYTE)(lpDstSurface->pixels))[y * lpDstSurface->pitch + x] = rng[ptr++];
-         if (++x >= 320)
-         {
-            x = 0;
-            ++y;
-         }
-         ((LPBYTE)(lpDstSurface->pixels))[y * lpDstSurface->pitch + x] = rng[ptr++];
-         dst_ptr += 2;
-
-      case 0x09:
-         x = dst_ptr % 320;
-         y = dst_ptr / 320;
-         ((LPBYTE)(lpDstSurface->pixels))[y * lpDstSurface->pitch + x] = rng[ptr++];
-         if (++x >= 320)
-         {
-            x = 0;
-            ++y;
-         }
-         ((LPBYTE)(lpDstSurface->pixels))[y * lpDstSurface->pitch + x] = rng[ptr++];
-         dst_ptr += 2;
-
-      case 0x08:
-         x = dst_ptr % 320;
-         y = dst_ptr / 320;
-         ((LPBYTE)(lpDstSurface->pixels))[y * lpDstSurface->pitch + x] = rng[ptr++];
-         if (++x >= 320)
-         {
-            x = 0;
-            ++y;
-         }
-         ((LPBYTE)(lpDstSurface->pixels))[y * lpDstSurface->pitch + x] = rng[ptr++];
-         dst_ptr += 2;
-
-      case 0x07:
-         x = dst_ptr % 320;
-         y = dst_ptr / 320;
-         ((LPBYTE)(lpDstSurface->pixels))[y * lpDstSurface->pitch + x] = rng[ptr++];
-         if (++x >= 320)
-         {
-            x = 0;
-            ++y;
-         }
-         ((LPBYTE)(lpDstSurface->pixels))[y * lpDstSurface->pitch + x] = rng[ptr++];
-         dst_ptr += 2;
-
-      case 0x06:
-         x = dst_ptr % 320;
-         y = dst_ptr / 320;
-         ((LPBYTE)(lpDstSurface->pixels))[y * lpDstSurface->pitch + x] = rng[ptr++];
-         if (++x >= 320)
-         {
-            x = 0;
-            ++y;
-         }
-         ((LPBYTE)(lpDstSurface->pixels))[y * lpDstSurface->pitch + x] = rng[ptr++];
-         dst_ptr += 2;
-         break;
-
-      case 0x0b:
-         data = *(rng + ptr++);
-         for (i = 0; i <= data; i++)
-         {
-            x = dst_ptr % 320;
-            y = dst_ptr / 320;
-            ((LPBYTE)(lpDstSurface->pixels))[y * lpDstSurface->pitch + x] = rng[ptr++];
-            if (++x >= 320)
-            {
-               x = 0;
-               ++y;
-            }
-            ((LPBYTE)(lpDstSurface->pixels))[y * lpDstSurface->pitch + x] = rng[ptr++];
-            dst_ptr += 2;
-         }
-         break;
-
-      case 0x0c:
-         wdata = rng[ptr] | (rng[ptr + 1] << 8);
-         ptr += 2;
-         for (i = 0; i <= wdata; i++)
-         {
-            x = dst_ptr % 320;
-            y = dst_ptr / 320;
-            ((LPBYTE)(lpDstSurface->pixels))[y * lpDstSurface->pitch + x] = rng[ptr++];
-            if (++x >= 320)
-            {
-               x = 0;
-               ++y;
-            }
-            ((LPBYTE)(lpDstSurface->pixels))[y * lpDstSurface->pitch + x] = rng[ptr++];
-            dst_ptr += 2;
-         }
-         break;
-
-      case 0x0d:
-      case 0x0e:
-      case 0x0f:
-      case 0x10:
-         for (i = 0; i < data - (0x0d - 2); i++)
-         {
-            x = dst_ptr % 320;
-            y = dst_ptr / 320;
-            ((LPBYTE)(lpDstSurface->pixels))[y * lpDstSurface->pitch + x] = rng[ptr];
-            if (++x >= 320)
-            {
-               x = 0;
-               ++y;
-            }
-            ((LPBYTE)(lpDstSurface->pixels))[y * lpDstSurface->pitch + x] = rng[ptr + 1];
-            dst_ptr += 2;
-         }
-         ptr += 2;
-         break;
-
-      case 0x11:
-    	 data = *(rng + ptr++);
-         for (i = 0; i <= data; i++)
-         {
-            x = dst_ptr % 320;
-            y = dst_ptr / 320;
-            ((LPBYTE)(lpDstSurface->pixels))[y * lpDstSurface->pitch + x] = rng[ptr];
-            if (++x >= 320)
-            {
-               x = 0;
-               ++y;
-            }
-            ((LPBYTE)(lpDstSurface->pixels))[y * lpDstSurface->pitch + x] = rng[ptr + 1];
-            dst_ptr += 2;
-         }
-         ptr += 2;
-         break;
-
-      case 0x12:
-         n = (rng[ptr] | (rng[ptr + 1] << 8)) + 1;
-         ptr += 2;
-         for (i = 0; i < n; i++)
-         {
-            x = dst_ptr % 320;
-            y = dst_ptr / 320;
-            ((LPBYTE)(lpDstSurface->pixels))[y * lpDstSurface->pitch + x] = rng[ptr];
-            if (++x >= 320)
-            {
-               x = 0;
-               ++y;
-            }
-            ((LPBYTE)(lpDstSurface->pixels))[y * lpDstSurface->pitch + x] = rng[ptr + 1];
-            dst_ptr += 2;
-         }
-         ptr += 2;
-         break;
+    // 0x06-0x0a: 绘制连续 2 到 10 个字节的像素数据
+    case 0x06:
+    case 0x07:
+    case 0x08:
+    case 0x09:
+    case 0x0a:
+      for (int i = 0; i < data - (0x06 - 1); i++) {
+        COPY_PIXEL;
+        COPY_PIXEL;
       }
-   }
+      break;
 
-end:
-   return 0;
+    case 0x0b:
+      data = rng[ptr++];
+      for (int i = 0; i <= data; i++) {
+        COPY_PIXEL;
+        COPY_PIXEL;
+      }
+      break;
+
+    case 0x0c:
+      wdata = rng[ptr++];
+      wdata |= rng[ptr++] << 8;
+      for (int i = 0; i <= wdata; i++) {
+        COPY_PIXEL;
+        COPY_PIXEL;
+      }
+      break;
+
+    // 重复模式
+    case 0x0d:
+    case 0x0e:
+    case 0x0f:
+    case 0x10:
+      for (int i = 0; i < data - (0x0d - 2); i++) {
+        COPY_PIXEL;
+        COPY_PIXEL;
+        ptr -= 2;
+      }
+      ptr += 2;
+      break;
+
+    case 0x11:
+      data = rng[ptr++];
+      for (int i = 0; i <= data; i++) {
+        COPY_PIXEL;
+        COPY_PIXEL;
+        ptr -= 2;
+      }
+      ptr += 2;
+      break;
+
+    case 0x12:
+      wdata = rng[ptr++];
+      wdata |= rng[ptr++] << 8;
+      for (int i = 0; i <= wdata; i++) {
+        COPY_PIXEL;
+        COPY_PIXEL;
+        ptr -= 2;
+      }
+      ptr += 2;
+      break;
+    }
+  }
+
+  return 0;
 }
 
-VOID
-PAL_RNGPlay(
-   INT           iNumRNG,
-   INT           iStartFrame,
-   INT           iEndFrame,
-   INT           iSpeed
-)
-/*++
-  Purpose:
+// Play a RNG movie.
+VOID PAL_RNGPlay(INT iNumRNG, INT iStartFrame, INT iEndFrame, INT iSpeed) {
+  uint8_t rng[65000], buf[65000];
+  FILE *fp = UTIL_OpenRequiredFile("rng.mkf");
+  if (iEndFrame > 0)
+    iEndFrame++;
+  for (double iTime = PAL_GetTicks(); iStartFrame != iEndFrame; iStartFrame++) {
+    // Read, decompress and render the frame
+    if (PAL_RNGReadFrame(buf, sizeof(buf), iNumRNG, iStartFrame, fp) < 0)
+      break;
+    if (PAL_RNGBlitToSurface(rng, Decompress(buf, rng, sizeof(rng)), gpScreen) < 0)
+      break;
 
-    Play a RNG movie.
+    // Update the screen
+    VIDEO_UpdateScreen(NULL);
 
-  Parameters:
+    // Fade in the screen if needed
+    if (gNeedToFadeIn) {
+      PAL_FadeIn(gCurPalette, gNightPalette, 1);
+      gNeedToFadeIn = FALSE;
+    }
 
-    [IN]  iNumRNG - number of the RNG movie.
+    // Delay for a while
+    iTime += 1000.0 / (iSpeed == 0 ? 16 : iSpeed);
+    PAL_DelayUntil(iTime);
+  }
 
-    [IN]  iStartFrame - start frame number.
-
-    [IN]  iEndFrame - end frame number.
-
-    [IN]  iSpeed - speed of playing.
-
-  Return value:
-
-    None.
-
---*/
-{
-   double         iDelay = (double)SDL_GetPerformanceFrequency() / (iSpeed == 0 ? 16 : iSpeed);
-   uint8_t        *rng = (uint8_t *)malloc(65000);
-   uint8_t        *buf = (uint8_t *)malloc(65000);
-   FILE           *fp = UTIL_OpenRequiredFile("rng.mkf");
-
-   //
-   // Avoid losing the last frame
-   //
-   if (iEndFrame > 0) iEndFrame++;
-
-   for (double iTime = SDL_GetPerformanceCounter(); rng && buf && iStartFrame != iEndFrame; iStartFrame++)
-   {
-      iTime += iDelay;
-
-      //
-      // Read, decompress and render the frame
-      //
-      if (PAL_RNGReadFrame(buf, 65000, iNumRNG, iStartFrame, fp) < 0 ||
-          PAL_RNGBlitToSurface(rng, Decompress(buf, rng, 65000), gpScreen) == -1)
-      {
-         //
-         // Failed to get the frame, don't go further
-         //
-         break;
-      }
-
-      //
-      // Update the screen
-      //
-      VIDEO_UpdateScreen(NULL);
-
-      //
-      // Fade in the screen if needed
-      //
-      if (gpGlobals->fNeedToFadeIn)
-      {
-         PAL_FadeIn(gpGlobals->wNumPalette, gpGlobals->fNightPalette, 1);
-         gpGlobals->fNeedToFadeIn = FALSE;
-      }
-
-      //
-      // Delay for a while
-      //
-	  PAL_DelayUntilPC(iTime);
-   }
-
-   fclose(fp);
-   free(rng);
-   free(buf);
+  fclose(fp);
 }

@@ -26,32 +26,7 @@
 
 PAL_C_LINKAGE_BEGIN
 
-VOID
-PAL_AVIInit(
-    VOID
-);
-
-VOID
-PAL_AVIShutdown(
-    VOID
-);
-
-BOOL
-PAL_PlayAVI(
-    const char *lpszPath
-);
-
-void SDLCALL
-AVI_FillAudioBuffer(
-    void       *udata,
-    uint8_t    *stream,
-    int         len
-);
-
-void *
-AVI_GetPlayState(
-	void
-);
+BOOL PAL_PlayAVI(const char *lpszPath);
 
 PAL_C_LINKAGE_END
 

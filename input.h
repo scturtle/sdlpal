@@ -23,18 +23,13 @@
 #define INPUT_H
 
 #include "common.h"
-#include "palcommon.h"
 
 typedef struct tagPALINPUTSTATE
 {
-   PALDIRECTION           dir, prevdir;
+   PALDIRECTION           dir;
    DWORD                  dwKeyPress;
    DWORD                  dwKeyOrder[4];
    DWORD                  dwKeyMaxCount;
-#if PAL_HAS_JOYSTICKS
-   int                    axisX,axisY;
-   BOOL                   joystickNeedUpdate;
-#endif
 } PALINPUTSTATE;
 
 enum PALKEY
@@ -62,43 +57,13 @@ enum PALKEY
 
 PAL_C_LINKAGE_BEGIN
 
-VOID
-PAL_ClearKeyState(
-   VOID
-);
+VOID PAL_ClearKeyState(VOID);
 
-VOID
-PAL_InitInput(
-   VOID
-);
+VOID PAL_InitInput(VOID);
 
-VOID
-PAL_ProcessEvent(
-   VOID
-);
-
-VOID
-PAL_ShutdownInput(
-   VOID
-);
-
-VOID
-PAL_SetTouchBounds(
-   DWORD dwScreenWidth,
-   DWORD dwScreenHeight,
-   SDL_Rect renderRect
-);
-
-VOID
-PAL_RegisterInputFilter(
-   void (*init_filter)(),
-   int (*event_filter)(const SDL_Event *, volatile PALINPUTSTATE *),
-   void (*shutdown_filter)()
-);
+VOID PAL_ProcessEvent(VOID);
 
 extern volatile PALINPUTSTATE g_InputState;
-
-extern BOOL g_fUseJoystick;
 
 PAL_C_LINKAGE_END
 

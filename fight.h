@@ -26,11 +26,6 @@
 
 PAL_C_LINKAGE_BEGIN
 
-INT
-PAL_BattleSelectAutoTargetFrom(
-   INT
-);
-
 BOOL
 PAL_IsPlayerDying(
    WORD
@@ -45,20 +40,6 @@ INT
 PAL_BattleSelectAutoTarget(
    VOID
 );
-
-#ifndef PAL_CLASSIC
-
-VOID
-PAL_UpdateTimeChargingUnit(
-   VOID
-);
-
-FLOAT
-PAL_GetTimeChargingSpeed(
-   WORD           wDexterity
-);
-
-#endif
 
 VOID
 PAL_BattleUpdateFighters(
@@ -115,6 +96,10 @@ PAL_BattleSimulateMagic(
    WORD       wMagicObjectID,
    WORD       wBaseDamage
 );
+
+BOOL PAL_EnemyDivisionItself(WORD count, WORD wEventObjectID);
+
+BOOL PAL_EnemySummonMonster(WORD monsterObjectID, WORD count, WORD wEventObjectID);
 
 PAL_C_LINKAGE_END
 

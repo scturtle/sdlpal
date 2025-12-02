@@ -25,125 +25,66 @@
 #include "common.h"
 #include "ui.h"
 
-typedef enum tagBATTLEUISTATE
-{
-   kBattleUIWait,
-   kBattleUISelectMove,
-   kBattleUISelectTargetEnemy,
-   kBattleUISelectTargetPlayer,
-   kBattleUISelectTargetEnemyAll,
-   kBattleUISelectTargetPlayerAll,
+typedef enum tagBATTLEUISTATE {
+  kBattleUIWait,                  // UI等待状态（无交互）
+  kBattleUISelectMove,            // 待选择行动
+  kBattleUISelectTargetEnemy,     // 待选择敌方目标
+  kBattleUISelectTargetPlayer,    // 待选择友方目标
+  kBattleUISelectTargetEnemyAll,  // 针对全体敌方
+  kBattleUISelectTargetPlayerAll, // 针对全体友方
 } BATTLEUISTATE;
 
-typedef enum tagBATTLEMENUSTATE
-{
-   kBattleMenuMain,
-   kBattleMenuMagicSelect,
-   kBattleMenuUseItemSelect,
-   kBattleMenuThrowItemSelect,
-   kBattleMenuMisc,
-   kBattleMenuMiscItemSubMenu,
+typedef enum tagBATTLEMENUSTATE {
+  kBattleMenuMain,            // 战斗主菜单
+  kBattleMenuMagicSelect,     // 仙术选择子菜单
+  kBattleMenuUseItemSelect,   // 物品使用子菜单
+  kBattleMenuThrowItemSelect, // 物品投掷子菜单
+  kBattleMenuMisc,            // 杂项菜单 (合击/防御/逃跑/状态)
+  kBattleMenuMiscItemSubMenu, // 杂项中的物品子菜单
 } BATTLEMENUSTATE;
 
-typedef enum tagBATTLEUIACTION
-{
-   kBattleUIActionAttack,
-   kBattleUIActionMagic,
-   kBattleUIActionCoopMagic,
-   kBattleUIActionMisc,
+typedef enum tagBATTLEUIACTION {
+  kBattleUIActionAttack,    // 界面动作：普攻
+  kBattleUIActionMagic,     // 界面动作：仙术
+  kBattleUIActionCoopMagic, // 界面动作：合击技
+  kBattleUIActionMisc,      // 界面动作：其他 (物品/防御/逃跑)
 } BATTLEUIACTION;
 
-#define SPRITENUM_BATTLEICON_ATTACK      40
-#define SPRITENUM_BATTLEICON_MAGIC       41
-#define SPRITENUM_BATTLEICON_COOPMAGIC   42
-#define SPRITENUM_BATTLEICON_MISCMENU    43
-
-#define SPRITENUM_BATTLE_ARROW_CURRENTPLAYER           69
-#define SPRITENUM_BATTLE_ARROW_CURRENTPLAYER_RED       68
-
-#define SPRITENUM_BATTLE_ARROW_SELECTEDPLAYER          67
-#define SPRITENUM_BATTLE_ARROW_SELECTEDPLAYER_RED      66
-
-#define BATTLEUI_LABEL_ITEM              5
-#define BATTLEUI_LABEL_DEFEND            58
-#define BATTLEUI_LABEL_AUTO              56
-#define BATTLEUI_LABEL_INVENTORY         57
-#define BATTLEUI_LABEL_FLEE              59
-#define BATTLEUI_LABEL_STATUS            60
-
-#define BATTLEUI_LABEL_USEITEM           23
-#define BATTLEUI_LABEL_THROWITEM         24
-
-#define TIMEMETER_COLOR_DEFAULT          0x1B
-#define TIMEMETER_COLOR_SLOW             0x5B
-#define TIMEMETER_COLOR_HASTE            0x2A
-
-#define BATTLEUI_MAX_SHOWNUM             16
-
-typedef struct tagSHOWNUM
-{
-   WORD             wNum;
-   PAL_POS          pos;
-   DWORD            dwTime;
-   NUMCOLOR         color;
+typedef struct tagSHOWNUM {
+  WORD wNum;       // 显示的数值 (伤害或回复量)
+  PAL_POS pos;     // 数值显示的屏幕坐标
+  BYTE pastFrames; // 已显示的帧数 (最多 10 帧)
+  NUMCOLOR color;  // 数值的颜色 (如红色代表伤害，绿色代表回复)
 } SHOWNUM;
 
-typedef struct tagBATTLEUI
-{
-   BATTLEUISTATE    state;
-   BATTLEMENUSTATE  MenuState;
+#define BATTLEUI_MAX_SHOWNUM 16
 
-   WCHAR            szMsg[256];           // message to be shown on the screen
-   WCHAR            szNextMsg[256];       // next message to be shown on the screen
-   DWORD            dwMsgShowTime;        // the end time of showing the message
-   WORD             wNextMsgDuration;     // duration of the next message
+typedef struct tagBATTLEUI {
+  BATTLEUISTATE state;       // 当前UI状态（选择动作/选择目标等）
+  BATTLEMENUSTATE MenuState; // 当前菜单层级状态
 
-   WORD             wCurPlayerIndex;      // index of the current player
-   WORD             wSelectedAction;      // current selected action
-   INT              iSelectedIndex;       // current selected index of player or enemy
-   INT              iPrevEnemyTarget;     // previous enemy target
+  WORD wCurPlayerIndex; // 当前正在操作的玩家角色索引
+  WORD wSelectedAction; // 当前菜单中选中的选项索引
+  INT iSelectedIndex;   // 当前光标选中的目标索引（敌人或玩家）
+  INT iPrevEnemyTarget; // 上一次选中的敌人目标（用于光标记忆）
 
-   WORD             wActionType;          // type of action to be performed
-   WORD             wObjectID;            // object ID of the item or magic to use
+  WORD wActionType; // 最终决定执行的动作类型
+  WORD wObjectID;   // 要使用的物品或仙术的对象ID
 
-   BOOL             fAutoAttack;          // TRUE if auto attack
+  BOOL fAutoAttack; // 自动攻击模式
 
-   SHOWNUM          rgShowNum[BATTLEUI_MAX_SHOWNUM];
+  SHOWNUM rgShowNum[BATTLEUI_MAX_SHOWNUM]; // 飘出的数值对象数组（伤害/治疗数字）
 } BATTLEUI;
 
 PAL_C_LINKAGE_BEGIN
 
-VOID
-PAL_PlayerInfoBox(
-   PAL_POS         pos,
-   WORD            wPlayerRole,
-   INT             iTimeMeter,
-   BYTE            bTimeMeterColor,
-   BOOL            fUpdate
-);
+VOID PAL_PlayerInfoBox(PAL_POS pos, int iPartyIndex, BOOL fUpdate);
 
-VOID
-PAL_BattleUIShowText(
-   LPCWSTR       lpszText,
-   WORD          wDuration
-);
+VOID PAL_BattleUIPlayerReady(WORD wPlayerIndex);
 
-VOID
-PAL_BattleUIPlayerReady(
-   WORD          wPlayerIndex
-);
+VOID PAL_BattleUIUpdate(VOID);
 
-VOID
-PAL_BattleUIUpdate(
-   VOID
-);
-
-VOID
-PAL_BattleUIShowNum(
-   WORD           wNum,
-   PAL_POS        pos,
-   NUMCOLOR       color
-);
+VOID PAL_BattleUIShowNum(WORD wNum, PAL_POS pos, NUMCOLOR color);
 
 PAL_C_LINKAGE_END
 

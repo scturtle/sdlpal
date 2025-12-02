@@ -22,16 +22,6 @@
 #ifndef _COMMON_H
 #define _COMMON_H
 
-#ifndef ENABLE_REVISIED_BATTLE
-# define PAL_CLASSIC        1
-#endif
-
-#include "defines.h"
-
-#if defined(_MSC_VER) && !defined(_CRT_SECURE_NO_WARNINGS)
-#define _CRT_SECURE_NO_WARNINGS
-#endif
-
 #include <wchar.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,88 +32,21 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdbool.h>
-
-#include "sdl_compat.h"
-
-#define __WIDETEXT(quote) L##quote
-#define WIDETEXT(quote) __WIDETEXT(quote)
-
-#define STR_INDIR(x)                    #x
-#define STR(x)                          STR_INDIR(x)
-
-#if !defined(fmax) || !defined(fmin)
-# include <math.h>
-#endif
-
+#include <math.h>
 #include <float.h>
 
-#ifndef max
-# define max fmax
-#endif
+#include <SDL3/SDL.h>
 
-#ifndef min
-# define min fmin
-#endif
+inline int max(int a, int b) { return a > b ? a : b; }
+inline int min(int a, int b) { return a < b ? a : b; }
 
 // For SDL 1.2 compatibility
 #ifndef SDL_TICKS_PASSED
-#define SDL_TICKS_PASSED(A, B)  ((Sint32)((B) - (A)) <= 0)
+#define SDL_TICKS_PASSED(A, B) ((A) >= (B))
 #endif
-
-#ifndef SDL_INIT_CDROM
-# define SDL_INIT_CDROM       0	  /* Compatibility with SDL 1.2 */
-#endif
-
-#ifndef SDL_AUDIO_BITSIZE
-# define SDL_AUDIO_BITSIZE(x)         (x & 0xFF)
-#endif
-
-/* This is need when compiled with SDL 1.2 */
-#ifndef SDL_FORCE_INLINE
-#if defined(_MSC_VER)
-#define SDL_FORCE_INLINE __forceinline
-#elif ( (defined(__GNUC__) && (__GNUC__ >= 4)) || defined(__clang__) )
-#define SDL_FORCE_INLINE __attribute__((always_inline)) static __inline__
-#else
-#define SDL_FORCE_INLINE static SDL_INLINE
-#endif
-#endif /* SDL_FORCE_INLINE not defined */
-
-#if defined(_MSC_VER)
-# define PAL_FORCE_INLINE static SDL_FORCE_INLINE
-#else
-# define PAL_FORCE_INLINE SDL_FORCE_INLINE
-#endif
-
-#ifdef _WIN32
-
-# include <windows.h>
-# include <io.h>
-
-# if defined(_MSC_VER)
-#  if _MSC_VER < 1900
-#   define vsnprintf _vsnprintf
-#   define snprintf _snprintf
-#  endif
-#  define strdup _strdup
-#  define access _access
-#  pragma warning (disable:4244)
-# endif
-
-# ifndef _LPCBYTE_DEFINED
-#  define _LPCBYTE_DEFINED
-typedef const BYTE *LPCBYTE;
-# endif
-
-# define PAL_MAX_PATH  MAX_PATH
-
-#else
 
 # include <unistd.h>
 # include <dirent.h>
-# ifdef __APPLE__
-#  include <objc/objc.h>
-# endif
 
 # ifndef FALSE
 #  define FALSE               0
@@ -131,40 +54,75 @@ typedef const BYTE *LPCBYTE;
 # ifndef TRUE
 #  define TRUE                1
 # endif
-# define VOID                void
+
+#define VOID                void
+
 typedef char                CHAR;
 typedef wchar_t             WCHAR;
 typedef short               SHORT;
 typedef long                LONG;
-
-typedef unsigned long       ULONG, *PULONG;
-typedef unsigned short      USHORT, *PUSHORT;
-typedef unsigned char       UCHAR, *PUCHAR;
-
-typedef unsigned short      WORD, *LPWORD;
-typedef unsigned int        DWORD, *LPDWORD;
-typedef int                 INT, *LPINT;
-# if !defined( __APPLE__ ) && !defined( GEKKO )
-typedef int                 BOOL, *LPBOOL;
-# endif
-typedef unsigned int        UINT, *PUINT, UINT32, *PUINT32;
+typedef unsigned short      WORD;
+typedef unsigned int        DWORD;
+typedef int                 INT;
+typedef bool                BOOL;
+typedef unsigned int        UINT;
 typedef unsigned char       BYTE, *LPBYTE;
 typedef const BYTE         *LPCBYTE;
-typedef float               FLOAT, *LPFLOAT;
-typedef void               *LPVOID;
-typedef const void         *LPCVOID;
-typedef CHAR               *LPSTR;
+typedef float               FLOAT;
 typedef const CHAR         *LPCSTR;
 typedef WCHAR              *LPWSTR;
 typedef const WCHAR        *LPCWSTR;
 
-#ifdef PATH_MAX
-# define PAL_MAX_PATH  PATH_MAX
-#else
-# define PAL_MAX_PATH  1024
-#endif
+typedef LPBYTE  LPSPRITE, LPBITMAPRLE;
+typedef LPCBYTE LPCSPRITE, LPCBITMAPRLE;
 
-#endif
+typedef enum tagPALDIRECTION {
+  kDirSouth = 0,
+  kDirWest = 1,
+  kDirNorth = 2,
+  kDirEast = 3,
+  kDirUnknown = 4,
+} PALDIRECTION;
+
+typedef struct PAL_POS_t {
+  int16_t x, y;
+} PAL_POS;
+
+#define PAL_XY(x, y) ((PAL_POS) { (x), (y) })
+#define PAL_X(xy) ((xy).x)
+#define PAL_Y(xy) ((xy).y)
+#define PAL_XY_OFFSET(xy, xx, yy)  PAL_XY(PAL_X(xy) + (xx), PAL_Y(xy) + (yy))
+
+// maximum number of players in party
+#define     MAX_PLAYERS_IN_PARTY         3
+// total number of possible player roles
+#define     MAX_PLAYER_ROLES             6
+// totally number of playable player roles
+#define     MAX_PLAYABLE_PLAYER_ROLES    5
+// maximum entries of inventory
+#define     MAX_INVENTORY                256
+// maximum items in a store
+#define     MAX_STORE_ITEM               9
+// total number of magic attributes
+#define     NUM_MAGIC_ELEMENTAL          5
+// maximum number of enemies in a team
+#define     MAX_ENEMIES_IN_TEAM          5
+// maximum number of equipments for a player
+#define     MAX_PLAYER_EQUIPMENTS        6
+// maximum number of magics for a player
+#define     MAX_PLAYER_MAGICS            32
+// maximum number of scenes
+#define     MAX_SCENES                   300
+// maximum number of objects
+#define     MAX_OBJECTS                  600
+// maximum number of event objects
+#define     MAX_EVENTS                   5077
+// maximum number of effective poisons to players
+#define     MAX_POISONS                  16
+// maximum number of level
+#define     MAX_LEVELS                   99
+// buffer size for decompress rle image
+#define     PAL_RLEBUFSIZE               64000
 
 #ifdef __cplusplus
 # define PAL_C_LINKAGE       extern "C"
@@ -176,124 +134,71 @@ typedef const WCHAR        *LPCWSTR;
 # define PAL_C_LINKAGE_END
 #endif
 
-/* When porting SDLPAL to a new platform, please make a separate directory and put a file 
-   named 'pal_config.h' that contains marco definitions & header includes into the directory.
-   The example of this file can be found in directories of existing portings.
- */
-#include "pal_config.h"
-
-#if !SDL_VERSION_ATLEAST(2,0,0)
-# if PAL_HAS_GLSL
-#  undef PAL_HAS_GLSL
-# endif
-#define SDL_strcasecmp strcasecmp
-#define SDL_setenv(a,b,c) 
-#endif
-
-#ifndef PAL_DEFAULT_FULLSCREEN_HEIGHT
-# define PAL_DEFAULT_FULLSCREEN_HEIGHT PAL_DEFAULT_WINDOW_HEIGHT
-#endif
-
-#ifndef PAL_DEFAULT_TEXTURE_WIDTH
-# define PAL_DEFAULT_TEXTURE_WIDTH     PAL_DEFAULT_WINDOW_WIDTH
-#endif
-
-#ifndef PAL_DEFAULT_TEXTURE_HEIGHT
-# define PAL_DEFAULT_TEXTURE_HEIGHT    PAL_DEFAULT_WINDOW_HEIGHT
-#endif
-
-/* Default for 1024 samples */
-#ifndef PAL_AUDIO_DEFAULT_BUFFER_SIZE
-# define PAL_AUDIO_DEFAULT_BUFFER_SIZE   1024
-#endif
-
-#ifndef PAL_HAS_SDLCD
-# define PAL_HAS_SDLCD        0
-#endif
-
-#ifndef PAL_HAS_MP3
-# define PAL_HAS_MP3          1   /* Try always enable MP3. If compilation/run failed, please change this value to 0. */
-#endif
-#ifndef PAL_HAS_OGG
-# define PAL_HAS_OGG          1   /* Try always enable OGG. If compilation/run failed, please change this value to 0. */
-#endif
-#ifndef PAL_HAS_OPUS
-# define PAL_HAS_OPUS         1   /* Try always enable OPUS. If compilation/run failed, please change this value to 0. */
-#endif
-
-#ifndef PAL_CONFIG_PREFIX
-# define PAL_CONFIG_PREFIX PAL_PREFIX
-#endif
-
-#ifndef PAL_HAS_NATIVEMIDI
-# define PAL_HAS_NATIVEMIDI  0
-#endif
-
-#ifndef PAL_LARGE
-# define PAL_LARGE
-#endif
-
-#ifndef PAL_SCALE_SCREEN
-# define PAL_SCALE_SCREEN   TRUE
-#endif
-
-#ifndef PAL_IS_VALID_JOYSTICK
-# define PAL_IS_VALID_JOYSTICK(s)  TRUE
-#endif
-
-#ifndef PAL_FATAL_OUTPUT
-# define PAL_FATAL_OUTPUT(s)
-#endif
-
-#ifndef PAL_CONVERT_UTF8
-# define PAL_CONVERT_UTF8(s) s
-#endif
-
-#ifndef PAL_NATIVE_PATH_SEPARATOR
-# define PAL_NATIVE_PATH_SEPARATOR "/"
-#endif
-
 #define PAL_fread(buf, elem, num, fp) if (fread((buf), (elem), (num), (fp)) < (num)) return -1
 
-typedef enum tagLOGLEVEL
-{
-	LOGLEVEL_MIN,
-	LOGLEVEL_VERBOSE = LOGLEVEL_MIN,
-	LOGLEVEL_DEBUG,
-	LOGLEVEL_INFO,
-	LOGLEVEL_WARNING,
-	LOGLEVEL_ERROR,
-	LOGLEVEL_FATAL,
-	LOGLEVEL_MAX = LOGLEVEL_FATAL,
-} LOGLEVEL;
+PAL_C_LINKAGE_BEGIN
 
-#define PAL_LOG_MAX_OUTPUTS   (LOGLEVEL_MAX + 1)
+INT PAL_RLEBlitToSurface(LPCBITMAPRLE lpBitmapRLE, SDL_Surface *lpDstSurface, PAL_POS pos);
 
-#if defined(DEBUG) || defined(_DEBUG)
-# define PAL_DEFAULT_LOGLEVEL  LOGLEVEL_MIN
-#else
-# define PAL_DEFAULT_LOGLEVEL  LOGLEVEL_MAX
-#endif
+INT PAL_RLEBlitToSurfaceWithShadow(LPCBITMAPRLE lpBitmapRLE, SDL_Surface *lpDstSurface, PAL_POS pos, BOOL bShadow);
 
-#ifndef PAL_HAS_CONFIG_PAGE
-# define PAL_HAS_CONFIG_PAGE   FALSE
-#endif
+INT PAL_RLEBlitWithColorShift(LPCBITMAPRLE lpBitmapRLE, SDL_Surface *lpDstSurface, PAL_POS pos, INT iColorShift);
 
-#define PAL_MAX_GLOBAL_BUFFERS 4
-#define PAL_GLOBAL_BUFFER_SIZE 1024
+INT PAL_RLEBlitMonoColor(LPCBITMAPRLE lpBitmapRLE, SDL_Surface *lpDstSurface, PAL_POS pos, BYTE bColor, INT iColorShift);
 
-//
-// PAL_PATH_SEPARATORS contains all vaild path separators under a specific OS
-// If you define this constant, please put the default separator at first.
-//
-#ifndef PAL_PATH_SEPARATORS
-# define PAL_PATH_SEPARATORS "/"
-#endif
+INT PAL_RLEGetWidth(LPCBITMAPRLE lpBitmapRLE);
 
-#ifndef PAL_IS_PATH_SEPARATOR
-# define PAL_IS_PATH_SEPARATOR(x) ((x) == '/')
-#endif
+INT PAL_RLEGetHeight(LPCBITMAPRLE lpBitmapRLE);
 
-#include "adplug/opltypes.h"
+WORD PAL_SpriteGetNumFrames(LPCSPRITE lpSprite);
+
+LPCBITMAPRLE
+PAL_SpriteGetFrame(LPCSPRITE lpSprite, INT iFrameNum);
+
+INT PAL_MKFGetChunkCount(FILE *fp);
+
+INT PAL_MKFGetChunkSize(UINT uiChunkNum, FILE *fp);
+
+INT PAL_MKFReadChunk(LPBYTE lpBuffer, UINT uiBufferSize, UINT uiChunkNum, FILE *fp);
+
+INT PAL_MKFGetDecompressedSize(UINT uiChunkNum, FILE *fp);
+
+INT PAL_MKFDecompressChunk(LPBYTE lpBuffer, UINT uiBufferSize, UINT uiChunkNum, FILE *fp);
+
+// From yj1.c:
+INT Decompress(const VOID *Source, VOID *Destination, INT DestSize);
+
+void PAL_Delay(uint32_t ms);
+
+uint64_t PAL_GetTicks();
+
+void PAL_DelayUntil(uint32_t ms);
+
+char *UTIL_va(char *buffer, int buflen, const char *format, ...);
+#define PAL_va(i, fmt, ...) UTIL_va((char[PATH_MAX]){0}, PATH_MAX, fmt, __VA_ARGS__)
+
+int RandomLong(int from, int to);
+
+float RandomFloat(float from, float to);
+
+void UTIL_Delay(unsigned int ms);
+
+void TerminateOnError(const char *fmt, ...);
+
+void *UTIL_malloc(size_t buffer_size);
+
+FILE *UTIL_OpenRequiredFile(LPCSTR lpszFileName);
+
+FILE *UTIL_OpenFile(LPCSTR lpszFileName);
+
+FILE *UTIL_OpenFileForMode(LPCSTR lpszFileName, LPCSTR szMode);
+
+FILE *UTIL_OpenFileAtPathForMode(LPCSTR lpszPath, LPCSTR lpszFileName, LPCSTR szMode);
+
+const char *UTIL_CombinePath(char *buffer, size_t buflen, int numentry, ...);
+
+const char *UTIL_GetFullPathName(char *buffer, size_t buflen, const char *basepath, const char *subpath);
+
+PAL_C_LINKAGE_END
 
 #endif

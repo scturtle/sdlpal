@@ -52,760 +52,305 @@
  *   http://www.pcisys.net/~melanson/codecs/
  */
 
-#include "util.h"
-#include "audio.h"
 #include "aviplay.h"
+#include "audio.h"
 #include "input.h"
-#include "video.h"
-#include "riff.h"
 #include "palcfg.h"
+#include "riff.h"
+#include "video.h"
+#include <pthread.h>
 
-#if SDL_BYTEORDER == SDL_BIG_ENDIAN
+#define MAX_AVI_LEVELS 3
+#define FLG_MAIN_HDR 0x01
+#define FLG_VID_FMT 0x02
+#define FLG_AUD_FMT 0x04
+#define FLG_ALL_HDRS 0x07
 
-# define SwapStruct32(v, s) \
-	for(int s##_i = 0; s##_i < sizeof(s) / sizeof(uint32_t); s##_i++) \
-		((uint32_t *)&v)[s##_i] = SDL_Swap32(((uint32_t *)&v)[s##_i])
-
-# define SwapStructFields(v, f1, f2) v.f1 ^= v.f2, v.f2 ^= v.f1, v.f1 ^= v.f2
-
-
-#else
-
-# define SwapStruct32(...)
-# define SwapStructFields(...)
-
-#endif
-
-#define HAS_FLAG(v, f) (((v) & (f)) == (f))
-
-#define MAX_AVI_BLOCK_LEVELS 3
-
-#define FLAGS_AVI_MAIN_HEADER  0x01
-#define FLAGS_AVI_VIDEO_FORMAT 0x02
-#define FLAGS_AVI_AUDIO_FORMAT 0x04
-#define FLAGS_AVI_ALL_HEADERS  0x07
-
-typedef struct AVIPlayState
-{
-	SDL_mutex     *selfMutex;
-    volatile FILE *fp;                 // pointer to the AVI file
-    SDL_Surface   *surface;            // video buffer
-
-    long           lVideoEndPos;
-	uint32_t       dwMicroSecPerFrame;       // microseconds per frame
-	uint32_t       dwBufferSize;
-    SDL_AudioCVT   cvt;
-
-	uint8_t       *pChunkBuffer;
-	uint8_t       *pbAudioBuf;  // ring buffer for audio data
-	uint32_t       dwAudBufLen;
-	uint32_t       dwAudioReadPos;
-	uint32_t       dwAudioWritePos;
-
-	BOOL          fInterleaved;
+typedef struct AVIPlayState {
+  pthread_mutex_t mutex;
+  SDL_Surface *surface;
+  long videoEndPos;
+  uint32_t usPerFrame;
+  uint32_t bufSize;
+  SDL_AudioStream *stream;
+  uint8_t *chunkBuf;
 } AVIPlayState;
 
-static AVIPlayState gAVIPlayState;
+static AVIPlayState g_avi;
 
-static AVIPlayState *
-PAL_ReadAVIInfo(
-	FILE         *fp,
-	AVIPlayState *avi
-)
-{
-	RIFFHeader hdr;
-	AVIMainHeader aviHeader;
-	AVIStreamHeader streamHeader = { 0 };
-	BitmapInfoHeader bih;
-	WAVEFormatEx wfe;
-	uint32_t   block_type[MAX_AVI_BLOCK_LEVELS];
-	long       next_pos[MAX_AVI_BLOCK_LEVELS];
-	long       file_length = (fseek(fp, 0, SEEK_END), ftell(fp)), pos = 0;
-	int        current_level = 0, flags = 0;
+static BOOL PAL_ReadAVIInfo(FILE *fp) {
+  RIFFHeader hdr;
+  AVIMainHeader avih;
+  AVIStreamHeader strh = {0};
+  BitmapInfoHeader bih;
+  WAVEFormatEx wfe;
+  uint32_t blkType[MAX_AVI_LEVELS], curLvl = 0, flags = 0;
+  long nextPos[MAX_AVI_LEVELS], pos = 0;
 
-    //
-    // Check RIFF file header
-    //
-	fseek(fp, 0, SEEK_SET);
-	if(fread(&hdr, sizeof(RIFFHeader), 1, fp) != 1)
-	{
-		UTIL_LogOutput(LOGLEVEL_WARNING, "No RIFF header!");
-		return NULL;
-	}
-	hdr.signature = SDL_SwapLE32(hdr.signature);
-	hdr.type      = SDL_SwapLE32(hdr.type);
-	hdr.length    = SDL_SwapLE32(hdr.length);
-	if (hdr.signature != RIFF_RIFF || hdr.type != RIFF_AVI ||
-		hdr.length > (uint32_t)(file_length - sizeof(RIFFHeader) + sizeof(uint32_t)))
-	{
-		UTIL_LogOutput(LOGLEVEL_WARNING, "Illegal AVI RIFF header!");
-		return NULL;
-	}
-	else
-	{
-		next_pos[current_level] = (pos += sizeof(RIFFHeader)) + hdr.length;
-		block_type[current_level++] = hdr.type;
-	}
-    
-    while (!feof(fp) && current_level > 0)
-    {
-		RIFFBlockHeader block;
-		fseek(fp, pos, SEEK_SET);
-		if (fread(&block.type, sizeof(RIFFChunkHeader), 1, fp) != 1)
-		{
-			UTIL_LogOutput(LOGLEVEL_WARNING, "Illegal AVI RIFF LIST/Chunk header!");
-			return NULL;
-		}
-		else
-		{
-			block.type = SDL_SwapLE32(block.type);
-			block.length = SDL_SwapLE32(block.length);
-			pos += sizeof(RIFFChunkHeader);
-		}
+  fseek(fp, 0, SEEK_SET);
+  if (fread(&hdr, sizeof(hdr), 1, fp) != 1)
+    return FALSE;
 
-		//
-		// Read further if current block is a 'LIST'
-		//
-		if (block.type == AVI_LIST)
-		{
-			if (fread(&block.list.type, sizeof(RIFFListHeader) - sizeof(RIFFChunkHeader), 1, fp) != 1)
-			{
-				UTIL_LogOutput(LOGLEVEL_WARNING, "Illegal AVI RIFF LIST header!");
-				return NULL;
-			}
-			else
-			{
-				block.list.type = SDL_SwapLE32(block.list.type);
-			}
-		}
+  if (hdr.signature != RIFF_RIFF || hdr.type != RIFF_AVI)
+    return FALSE;
+  nextPos[curLvl] = (pos += sizeof(RIFFHeader)) + hdr.length;
+  blkType[curLvl++] = hdr.type;
 
-		switch (block_type[current_level - 1])
-		{
-		case RIFF_AVI:
-			//
-			// RIFF_AVI only appears at top-level
-			//
-			if (current_level != 1)
-			{
-				UTIL_LogOutput(LOGLEVEL_WARNING, "RIFF 'AVI ' block appears at non-top level!");
-				return NULL;
-			}
-			//
-			// For 'LIST' block, should read its contents
-			//
-			if (block.type == AVI_LIST)
-			{
-				next_pos[current_level] = pos + block.length;
-				block_type[current_level++] = block.list.type;
-				pos += sizeof(RIFFListHeader) - sizeof(RIFFChunkHeader);
-				continue;
-			}
-			//
-			// Ignore any block types other than 'LIST'
-			//
-			break;
+  while (!feof(fp) && curLvl > 0) {
+    RIFFBlockHeader blk;
+    fseek(fp, pos, SEEK_SET);
+    if (fread(&blk.type, sizeof(RIFFChunkHeader), 1, fp) != 1)
+      return FALSE;
+    pos += sizeof(RIFFChunkHeader);
 
-		case AVI_hdrl:
-			//
-			// AVI_hdrl only appears at second-level
-			//
-			if (current_level != 2)
-			{
-				UTIL_LogOutput(LOGLEVEL_WARNING, "RIFF 'hdrl' block does not appear at second level!");
-				return NULL;
-			}
-			switch (block.type)
-			{
-			case AVI_avih:
-				//
-				// The main header should only appear once
-				//
-				if (HAS_FLAG(flags, FLAGS_AVI_MAIN_HEADER))
-				{
-					UTIL_LogOutput(LOGLEVEL_WARNING, "More than one RIFF 'avih' blocks appear!");
-					return NULL;
-				}
-				if (fread(&aviHeader, sizeof(AVIMainHeader), 1, fp) != 1)
-				{
-					UTIL_LogOutput(LOGLEVEL_WARNING, "RIFF 'avih' blocks corrupted!");
-					return NULL;
-				}
-				SwapStruct32(aviHeader, AVIMainHeader);
-				flags |= FLAGS_AVI_MAIN_HEADER;
-				if (aviHeader.dwWidth == 0 || aviHeader.dwHeight == 0)
-				{
-					UTIL_LogOutput(LOGLEVEL_WARNING, "Invalid AVI frame size!");
-					return NULL;
-				}
-				if (HAS_FLAG(aviHeader.dwFlags, AVIF_MUSTUSEINDEX))
-				{
-					UTIL_LogOutput(LOGLEVEL_WARNING, "No built-in support for index-based AVI!");
-					return NULL;
-				}
-				break;
-			case AVI_LIST:
-				if (block.list.type == AVI_strl)
-				{
-					next_pos[current_level] = pos + block.length;
-					block_type[current_level++] = block.list.type;
-					pos += sizeof(RIFFListHeader) - sizeof(RIFFChunkHeader);
-					continue;
-				}
-				break;
-			}
-			break;
-
-		case AVI_movi:
-			//
-			// AVI_movi only appears at second-level and all headers should be read before
-			//
-			if (current_level != 2 || !HAS_FLAG(flags, FLAGS_AVI_ALL_HEADERS))
-			{
-				UTIL_LogOutput(LOGLEVEL_WARNING, "RIFF 'movi' block does not appear at second level or the AVI does not contain both video & audio!");
-				return NULL;
-			}
-			//
-			// Stop parsing here as actual movie data starts
-			//
-			fseek(fp, pos - sizeof(RIFFChunkHeader), SEEK_SET);
-			avi->lVideoEndPos = next_pos[current_level - 1];
-			avi->dwMicroSecPerFrame = aviHeader.dwMicroSecPerFrame;
-			//
-			// Create surface
-			//
-			avi->surface = SDL_CreateRGBSurface(SDL_SWSURFACE,
-				bih.biWidth, bih.biHeight, bih.biBitCount,
-				0x7C00, 0x03E0, 0x001F, 0x0000);
-			//
-			// Build SDL audio conversion info
-			//
-			SDL_BuildAudioCVT(&avi->cvt,
-				(wfe.format.wBitsPerSample == 8) ? AUDIO_U8 : AUDIO_S16LSB,
-				wfe.format.nChannels, wfe.format.nSamplesPerSec,
-				AUDIO_S16SYS,
-				AUDIO_GetDeviceSpec()->channels,
-				AUDIO_GetDeviceSpec()->freq);
-			//
-			// Allocate chunk buffer
-			// Since SDL converts audio in-place, we need to make the buffer large enough to hold converted data
-			//
-			avi->dwBufferSize = aviHeader.dwSuggestedBufferSize * avi->cvt.len_mult + sizeof(RIFFChunkHeader);
-			if (avi->dwBufferSize > 0)
-				avi->pChunkBuffer = UTIL_malloc(avi->dwBufferSize);
-			else
-				avi->pChunkBuffer = NULL;
-			//
-			// Allocate audio buffer, the buffer size is large enough to hold two-second audio data
-			//
-			avi->dwAudBufLen = max(wfe.format.nAvgBytesPerSec * 2, aviHeader.dwSuggestedBufferSize) * avi->cvt.len_mult;
-			avi->pbAudioBuf = (uint8_t *)UTIL_malloc(avi->dwAudBufLen);
-			avi->dwAudioReadPos = avi->dwAudioWritePos = 0;
-			return avi;
-
-		case AVI_strl:
-			//
-			// AVI_strl only appears at third-level
-			//
-			if (current_level != 3)
-			{
-				UTIL_LogOutput(LOGLEVEL_WARNING, "RIFF 'hdrl' block does not appear at third level!");
-				return NULL;
-			}
-			switch (block.type)
-			{
-			case AVI_strh:
-				// strh should be the first block of the list
-				if (streamHeader.fccType != 0)
-				{
-					UTIL_LogOutput(LOGLEVEL_WARNING, "RIFF 'strh' block does not appear at first!");
-					return NULL;
-				}
-				if (fread(&streamHeader, sizeof(AVIStreamHeader), 1, fp) != 1)
-				{
-					UTIL_LogOutput(LOGLEVEL_WARNING, "RIFF 'hdrl' block data corrupted!");
-					return NULL;
-				}
-				SwapStruct32(streamHeader, AVIStreamHeader);
-				SwapStructFields(streamHeader, wLanguage, wPriority);
-				SwapStructFields(streamHeader, rcFrame[0], rcFrame[1]);
-				SwapStructFields(streamHeader, rcFrame[2], rcFrame[3]);
-				break;
-			case AVI_strf:
-				//
-				// AVI_strf should follow AVI_strh
-				// Accept only one video stream & one audio stream
-				//
-				switch (streamHeader.fccType)
-				{
-				case AVI_vids:
-					if (fread(&bih, sizeof(BitmapInfoHeader), 1, fp) != 1)
-					{
-						UTIL_LogOutput(LOGLEVEL_WARNING, "Video codec information corrupted!");
-						return NULL;
-					}
-					SwapStruct32(bih, BitmapInfoHeader);
-					SwapStructFields(bih, biPlanes, biBitCount);
-					if (HAS_FLAG(flags, FLAGS_AVI_VIDEO_FORMAT) || (bih.biCompression != CODEC_MSVC && bih.biCompression != CODEC_msvc && bih.biCompression != CODEC_CRAM && bih.biCompression != CODEC_cram))
-					{
-						UTIL_LogOutput(LOGLEVEL_WARNING, "The AVI uses video codec with no built-in support, or video codec appeared before!");
-						return NULL;
-					}
-					if (bih.biBitCount != 16)
-					{
-						UTIL_LogOutput(LOGLEVEL_WARNING, "Built-in AVI playing support only 16-bit video!");
-						return NULL;
-					}
-					flags |= FLAGS_AVI_VIDEO_FORMAT;
-					break;
-				case AVI_auds:
-					if (fread(&wfe, sizeof(WAVEFormatPCM) + sizeof(uint16_t), 1, fp) != 1)
-					{
-						UTIL_LogOutput(LOGLEVEL_WARNING, "Audio codec information corrupted!");
-						return NULL;
-					}
-					SwapStruct32(wfe, WAVEFormatPCM);
-					SwapStructFields(wfe.format, wFormatTag, nChannels);
-					SwapStructFields(wfe.format, nBlockAlign, wBitsPerSample);
-					if (HAS_FLAG(flags, FLAGS_AVI_AUDIO_FORMAT) || wfe.format.wFormatTag != CODEC_PCM_U8)
-					{
-						UTIL_LogOutput(LOGLEVEL_WARNING, "The AVI uses audio codec with no built-in support, or audio codec appeared before!");
-						return NULL;
-					}
-					flags |= FLAGS_AVI_AUDIO_FORMAT;
-					break;
-				}
-				//
-				// One strf per strh, reset the fccType here to prepare for next strh
-				//
-				streamHeader.fccType = 0;
-				break;
-			}
-		}
-
-		//
-		// Goto next block
-		//
-		pos += block.length;
-
-		//
-		// Check if it is the end of the parent block
-		//
-		while (current_level > 0 && pos == next_pos[current_level - 1])
-		{
-			current_level--;
-		}
-		//
-		// Returns NULL if block is illegaly formed
-		//
-		if (current_level > 0 && pos > next_pos[current_level - 1])
-		{
-			return NULL;
-		}
+    if (blk.type == AVI_LIST) {
+      if (fread(&blk.list.type, sizeof(uint32_t), 1, fp) != 1)
+        return FALSE;
     }
 
-	return NULL;
-}
+    switch (blkType[curLvl - 1]) {
+    case RIFF_AVI:
+      if (curLvl != 1)
+        return FALSE;
+      if (blk.type == AVI_LIST) {
+        nextPos[curLvl] = pos + blk.length;
+        blkType[curLvl++] = blk.list.type;
+        pos += 4; // Skip LIST type
+        continue;
+      }
+      break;
 
+    case AVI_hdrl:
+      if (curLvl != 2)
+        return FALSE;
+      if (blk.type == AVI_avih) {
+        if ((flags & FLG_MAIN_HDR) || fread(&avih, sizeof(avih), 1, fp) != 1)
+          return FALSE;
+        flags |= FLG_MAIN_HDR;
+        if (!avih.dwWidth || !avih.dwHeight || (avih.dwFlags & AVIF_MUSTUSEINDEX))
+          return FALSE;
+      } else if (blk.type == AVI_LIST && blk.list.type == AVI_strl) {
+        nextPos[curLvl] = pos + blk.length;
+        blkType[curLvl++] = blk.list.type;
+        pos += 4;
+        continue;
+      }
+      break;
 
-static RIFFChunk *
-PAL_ReadDataChunk(
-	FILE     *fp,
-	long      endPos,
-	void     *userbuf,
-	uint32_t  buflen,
-	int       mult
-)
-{
-	RIFFBlockHeader  hdr;
-	RIFFChunk       *chunk = NULL;
-	long             pos = feof(fp) ? endPos : ftell(fp);
+    case AVI_movi:
+      if (curLvl != 2 || (flags & FLG_ALL_HDRS) != FLG_ALL_HDRS)
+        return FALSE;
 
-	while (chunk == NULL && pos < endPos)
-	{
-		if (fread(&hdr, sizeof(RIFFChunkHeader), 1, fp) != 1) return NULL;
+      fseek(fp, pos - sizeof(RIFFChunkHeader), SEEK_SET);
 
-		hdr.type = SDL_SwapLE32(hdr.type);
-		hdr.length = SDL_SwapLE32(hdr.length);
-		pos += sizeof(RIFFChunkHeader);
+      g_avi.videoEndPos = nextPos[curLvl - 1];
+      g_avi.usPerFrame = avih.dwMicroSecPerFrame;
+      g_avi.surface = SDL_CreateSurface(bih.biWidth, bih.biHeight, SDL_PIXELFORMAT_XRGB1555);
+      g_avi.bufSize = avih.dwSuggestedBufferSize + sizeof(RIFFChunkHeader);
+      g_avi.chunkBuf = g_avi.bufSize > 0 ? UTIL_malloc(g_avi.bufSize) : NULL;
 
-		switch (hdr.type)
-		{
-		case AVI_01wb:
-		case AVI_00db:
-		case AVI_00dc:
-			//
-			// got actual audio/video frame
-			//
-			if (userbuf && buflen >= sizeof(RIFFChunkHeader) + hdr.length)
-				chunk = (RIFFChunk *)userbuf;
-			else
-				chunk = (RIFFChunk *)UTIL_malloc(sizeof(RIFFChunkHeader) + hdr.length * (hdr.type == AVI_01wb ? mult : 1));
-			if (fread(chunk->data, hdr.length, 1, fp) != 1)
-			{
-				free(chunk);
-				return NULL;
-			}
-			chunk->header = hdr.chunk;
-			break;
+      SDL_AudioSpec srcSpec;
+      srcSpec.format = (wfe.format.wBitsPerSample == 8) ? SDL_AUDIO_U8 : SDL_AUDIO_S16LE;
+      srcSpec.channels = wfe.format.nChannels;
+      srcSpec.freq = (float)wfe.format.nSamplesPerSec;
+      SDL_AudioSpec *dstSpec = AUDIO_GetDeviceSpec();
+      pthread_mutex_lock(&g_avi.mutex);
+      g_avi.stream = SDL_CreateAudioStream(&srcSpec, dstSpec);
+      SDL_BindAudioStream(AUDIO_GetDeviceID(), g_avi.stream);
 
-		case AVI_LIST:
-			//
-			// Only 'rec ' LIST is allowed here, if not, skip it completely
-			//
-			if (fread(&hdr.list.type, sizeof(uint32_t), 1, fp) != 1) return NULL;
-			hdr.list.type = SDL_SwapLE32(hdr.list.type);
-			if (hdr.list.type == AVI_rec) break;
-		case AVI_JUNK:
-		default:
-			//
-			// Ignore unrecognized chunks
-			//
-			fseek(fp, pos += hdr.length, SEEK_SET);
-		}
-	}
+      pthread_mutex_unlock(&g_avi.mutex);
 
-    return chunk;
-}
+      return TRUE;
 
-static void
-PAL_AVIFeedAudio(
-    AVIPlayState   *avi,
-    uint8_t        *buffer,
-    uint32_t        size
-)
-{
-    //
-    // Convert audio in-place at the original buffer
-    // This makes filling process much more simpler
-    //
-    avi->cvt.buf = buffer;
-    avi->cvt.len = size;
-    SDL_ConvertAudio(&avi->cvt);
-    size = avi->cvt.len_cvt;
-
-    SDL_mutexP(avi->selfMutex);
-    while (size > 0)
-    {
-        uint32_t feed_size = (avi->dwAudioWritePos + size > avi->dwAudBufLen) ? avi->dwAudBufLen - avi->dwAudioWritePos : size;
-
-        memcpy(avi->pbAudioBuf + avi->dwAudioWritePos, buffer, feed_size);
-
-        avi->dwAudioWritePos = (avi->dwAudioWritePos + feed_size) % avi->dwAudBufLen;
-
-        buffer += feed_size;
-        size -= feed_size;
+    case AVI_strl:
+      if (curLvl != 3)
+        return FALSE;
+      if (blk.type == AVI_strh) {
+        if (strh.fccType != 0 || fread(&strh, sizeof(strh), 1, fp) != 1)
+          return FALSE;
+      } else if (blk.type == AVI_strf) {
+        if (strh.fccType == AVI_vids) {
+          if (fread(&bih, sizeof(bih), 1, fp) != 1)
+            return FALSE;
+          if ((flags & FLG_VID_FMT) ||
+              (bih.biCompression != CODEC_MSVC && bih.biCompression != CODEC_msvc && bih.biCompression != CODEC_CRAM &&
+               bih.biCompression != CODEC_cram) ||
+              bih.biBitCount != 16)
+            return FALSE;
+          flags |= FLG_VID_FMT;
+        } else if (strh.fccType == AVI_auds) {
+          if (fread(&wfe, sizeof(WAVEFormatPCM) + 2, 1, fp) != 1)
+            return FALSE;
+          if ((flags & FLG_AUD_FMT) || wfe.format.wFormatTag != CODEC_PCM_U8)
+            return FALSE;
+          flags |= FLG_AUD_FMT;
+        }
+        strh.fccType = 0;
+      }
+      break;
     }
-    SDL_mutexV(avi->selfMutex);
+    pos += blk.length;
+    while (curLvl > 0 && pos == nextPos[curLvl - 1])
+      curLvl--;
+    if (curLvl > 0 && pos > nextPos[curLvl - 1])
+      return FALSE;
+  }
+  return FALSE;
 }
 
-void
-PAL_AVIInit(
-	void
-)
-{
-    gAVIPlayState.selfMutex = SDL_CreateMutex();
+static RIFFChunk *PAL_ReadDataChunk(FILE *fp, long endPos, void *ubuf, uint32_t ulen) {
+  RIFFBlockHeader hdr;
+  RIFFChunk *chunk = NULL;
+  long pos = feof(fp) ? endPos : ftell(fp);
+
+  while (!chunk && pos < endPos) {
+    if (fread(&hdr, sizeof(RIFFChunkHeader), 1, fp) != 1)
+      return NULL;
+    pos += sizeof(RIFFChunkHeader);
+
+    switch (hdr.type) {
+    case AVI_01wb:
+    case AVI_00db:
+    case AVI_00dc:
+      chunk = (ubuf && ulen >= sizeof(RIFFChunkHeader) + hdr.length)
+                  ? (RIFFChunk *)ubuf
+                  : UTIL_malloc(sizeof(RIFFChunkHeader) + hdr.length);
+      if (fread(chunk->data, hdr.length, 1, fp) != 1) {
+        if (chunk != ubuf)
+          free(chunk);
+        return NULL;
+      }
+      chunk->header = hdr.chunk;
+      break;
+    case AVI_LIST:
+      if (fread(&hdr.list.type, 4, 1, fp) != 1)
+        return NULL;
+      if (hdr.list.type == AVI_rec)
+        break;
+    default:
+      fseek(fp, pos += hdr.length, SEEK_SET);
+    }
+  }
+  return chunk;
 }
 
-void
-PAL_AVIShutdown(
-	void
-)
-{
-    SDL_DestroyMutex(gAVIPlayState.selfMutex);
-}
-
-static void
-PAL_RenderAVIFrameToSurface(
-    SDL_Surface      *lpSurface,
-    const RIFFChunk  *lpChunk
-)
-{
+static void PAL_RenderAVIFrame(SDL_Surface *s, const RIFFChunk *c) {
 #define AV_RL16(x) ((((const uint8_t *)(x))[1] << 8) | ((const uint8_t *)(x))[0])
-#define CHECK_STREAM_PTR(n) if ((stream_ptr + n) > lpChunk->header.length) { return; }
+  uint16_t *pixels = (uint16_t *)s->pixels;
+  uint32_t ptr = 0, skip = 0, stride = s->pitch >> 1;
+  int row_dec = stride + 4, w = s->w >> 2, h = s->h >> 2, total = w * h;
 
-    /* decoding parameters */
-	uint16_t *pixels = (unsigned short *)lpSurface->pixels;
-	uint32_t  stream_ptr = 0, skip_blocks = 0;
-	uint32_t  stride = lpSurface->pitch >> 1;
-	const int block_inc = 4;
-	const int row_dec = stride + 4;
-	const int blocks_wide = lpSurface->w >> 2; // width in 4x4 blocks
-	const int blocks_high = lpSurface->h >> 2; // height in 4x4 blocks
-	uint32_t  total_blocks = blocks_wide * blocks_high;
+  for (int by = h; by > 0; by--) {
+    int bptr = ((by * 4) - 1) * stride;
+    for (int bx = w; bx > 0; bx--) {
+      if (skip) {
+        bptr += 4;
+        skip--;
+        total--;
+        continue;
+      }
+      if (ptr + 2 > c->header.length)
+        return;
 
-    for (int block_y = blocks_high; block_y > 0; block_y--)
-    {
-        int block_ptr = ((block_y * 4) - 1) * stride;
-        for (int block_x = blocks_wide; block_x > 0; block_x--)
-        {
-            // check if this block should be skipped
-            if (skip_blocks)
-            {
-                block_ptr += block_inc;
-                skip_blocks--;
-                total_blocks--;
-                continue;
-            }
-            
-            int pixel_ptr = block_ptr;
-            
-            // get the next two bytes in the encoded data stream
-            CHECK_STREAM_PTR(2);
-            uint8_t byte_a = lpChunk->data[stream_ptr++];
-			uint8_t byte_b = lpChunk->data[stream_ptr++];
-            
-            // check if the decode is finished
-            if ((byte_a == 0) && (byte_b == 0) && (total_blocks == 0))
-            {
-                return;
-            }
-            else if ((byte_b & 0xFC) == 0x84)
-            {
-                // skip code, but don't count the current block
-                skip_blocks = ((byte_b - 0x84) << 8) + byte_a - 1;
-            }
-            else if (byte_b < 0x80)
-            {
-                // 2- or 8-color encoding modes
-                uint16_t flags = (byte_b << 8) | byte_a;
-				uint16_t colors[8];
-                
-                CHECK_STREAM_PTR(4);
-                colors[0] = AV_RL16(&lpChunk->data[stream_ptr]);
-                stream_ptr += 2;
-                colors[1] = AV_RL16(&lpChunk->data[stream_ptr]);
-                stream_ptr += 2;
-                
-                if (colors[0] & 0x8000)
-                {
-                    // 8-color encoding
-                    CHECK_STREAM_PTR(12);
-                    colors[2] = AV_RL16(&lpChunk->data[stream_ptr]);
-                    stream_ptr += 2;
-                    colors[3] = AV_RL16(&lpChunk->data[stream_ptr]);
-                    stream_ptr += 2;
-                    colors[4] = AV_RL16(&lpChunk->data[stream_ptr]);
-                    stream_ptr += 2;
-                    colors[5] = AV_RL16(&lpChunk->data[stream_ptr]);
-                    stream_ptr += 2;
-                    colors[6] = AV_RL16(&lpChunk->data[stream_ptr]);
-                    stream_ptr += 2;
-                    colors[7] = AV_RL16(&lpChunk->data[stream_ptr]);
-                    stream_ptr += 2;
-                    
-                    for (int pixel_y = 0; pixel_y < 4; pixel_y++)
-                    {
-                        for (int pixel_x = 0; pixel_x < 4; pixel_x++, flags >>= 1)
-                        {
-                            pixels[pixel_ptr++] =
-                            colors[((pixel_y & 0x2) << 1) +
-                                   (pixel_x & 0x2) + ((flags & 0x1) ^ 1)];
-                        }
-                        pixel_ptr -= row_dec;
-                    }
-                }
-                else
-                {
-                    // 2-color encoding
-                    for (int pixel_y = 0; pixel_y < 4; pixel_y++)
-                    {
-                        for (int pixel_x = 0; pixel_x < 4; pixel_x++, flags >>= 1)
-                        {
-                            pixels[pixel_ptr++] = colors[(flags & 0x1) ^ 1];
-                        }
-                        pixel_ptr -= row_dec;
-                    }
-                }
-            }
-            else
-            {
-                // otherwise, it's a 1-color block
-				uint16_t color = (byte_b << 8) | byte_a;
+      int pptr = bptr;
+      uint8_t a = c->data[ptr++], b = c->data[ptr++];
 
-                for (int pixel_y = 0; pixel_y < 4; pixel_y++)
-                {
-                    for (int pixel_x = 0; pixel_x < 4; pixel_x++)
-                    {
-                        pixels[pixel_ptr++] = color;
-                    }
-                    pixel_ptr -= row_dec;
-                }
-            }
-            
-            block_ptr += block_inc;
-            total_blocks--;
+      if (!a && !b && !total)
+        return;
+      else if ((b & 0xFC) == 0x84)
+        skip = ((b - 0x84) << 8) + a - 1;
+      else if (b < 0x80) {
+        uint16_t flags = (b << 8) | a, clr[8];
+        if (ptr + 4 > c->header.length)
+          return;
+        clr[0] = AV_RL16(&c->data[ptr]);
+        ptr += 2;
+        clr[1] = AV_RL16(&c->data[ptr]);
+        ptr += 2;
+
+        if (clr[0] & 0x8000) {
+          if (ptr + 12 > c->header.length)
+            return;
+          for (int i = 2; i < 8; i++, ptr += 2)
+            clr[i] = AV_RL16(&c->data[ptr]);
+          for (int py = 0; py < 4; py++, pptr -= row_dec)
+            for (int px = 0; px < 4; px++, flags >>= 1)
+              pixels[pptr++] = clr[((py & 2) << 1) + (px & 2) + ((flags & 1) ^ 1)];
+        } else {
+          for (int py = 0; py < 4; py++, pptr -= row_dec)
+            for (int px = 0; px < 4; px++, flags >>= 1)
+              pixels[pptr++] = clr[(flags & 1) ^ 1];
         }
+      } else {
+        uint16_t cval = (b << 8) | a;
+        for (int py = 0; py < 4; py++, pptr -= row_dec)
+          for (int px = 0; px < 4; px++)
+            pixels[pptr++] = cval;
+      }
+      bptr += 4;
+      total--;
     }
+  }
 }
 
+BOOL PAL_PlayAVI(LPCSTR path) {
+  if (!gConfig.fEnableAviPlay)
+    return FALSE;
+  FILE *fp = UTIL_OpenFile(path);
+  if (!fp) {
+    printf("Cannot open AVI file: %s!\n", path);
+    return FALSE;
+  }
 
-BOOL
-PAL_PlayAVI(
-    LPCSTR     lpszPath
-)
-{
-	if (!gConfig.fEnableAviPlay) return FALSE;
+  if (!PAL_ReadAVIInfo(fp)) {
+    printf("Failed to parse AVI file or its format not supported!\n");
+    fclose(fp);
+    return FALSE;
+  }
 
-	//
-	// Open the file
-	//
-	FILE *fp = UTIL_OpenFile(lpszPath);
-	if (fp == NULL)
-	{
-		UTIL_LogOutput(LOGLEVEL_WARNING, "Cannot open AVI file: %s!\n", lpszPath);
-		return FALSE;
-	}
+  PAL_ClearKeyState();
+  BOOL end = FALSE;
+  uint64_t usDelta = 0, now = PAL_GetTicks(), start = now, next;
 
-	AVIPlayState *avi = PAL_ReadAVIInfo(fp, &gAVIPlayState);
-	if (avi == NULL)
-	{
-		UTIL_LogOutput(LOGLEVEL_WARNING, "Failed to parse AVI file or its format not supported!\n");
-		fclose(fp);
-		return FALSE;
-	}
+  while (!end) {
+    RIFFChunk *c = PAL_ReadDataChunk(fp, g_avi.videoEndPos, g_avi.chunkBuf, g_avi.bufSize);
+    if (!c)
+      break;
 
-    PAL_ClearKeyState();
+    if (c->header.type == AVI_00dc || c->header.type == AVI_00db) {
+      next = start + (g_avi.usPerFrame / 1000);
+      usDelta += g_avi.usPerFrame % 1000;
+      next += usDelta / 1000;
+      usDelta %= 1000;
 
-#if SDL_VERSION_ATLEAST(3,0,0)
-	VIDEO_ChangeDepth(SDL_BITSPERPIXEL(avi->surface->format));
-#else
-	VIDEO_ChangeDepth(avi->surface->format->BitsPerPixel);
-#endif
+      PAL_RenderAVIFrame(g_avi.surface, c);
+      VIDEO_DrawSurfaceToScreen(g_avi.surface);
 
-	BOOL       fEndPlay = FALSE;
-	RIFFChunk *buf = (RIFFChunk *)avi->pChunkBuffer;
-	uint32_t   len = avi->dwBufferSize;
-	uint32_t   dwMicroSecChange = 0;
-	uint32_t   dwCurrentTime = SDL_GetTicks();
-	uint32_t   dwNextFrameTime;
-	uint32_t   dwFrameStartTime = dwCurrentTime;
+      now = PAL_GetTicks();
+      UTIL_Delay(now >= next ? 1 : next - now);
+      start = PAL_GetTicks();
 
-    while (!fEndPlay)
-    {
-		RIFFChunk *chunk = PAL_ReadDataChunk(fp, avi->lVideoEndPos, buf, len, avi->cvt.len_mult);
-
-		if (chunk == NULL) break;
-
-        switch (chunk->header.type)
-        {
-        case AVI_00dc:
-        case AVI_00db:
-            //
-            // Video frame
-            //
-			dwNextFrameTime = dwFrameStartTime + (avi->dwMicroSecPerFrame / 1000);
-
-			dwMicroSecChange += avi->dwMicroSecPerFrame % 1000;
-			dwNextFrameTime += dwMicroSecChange / 1000;
-			dwMicroSecChange %= 1000;
-
-			PAL_RenderAVIFrameToSurface(avi->surface, chunk);
-            VIDEO_DrawSurfaceToScreen(avi->surface);
-
-            dwCurrentTime = SDL_GetTicks();
-
-            // Check input states here
-            UTIL_Delay(dwCurrentTime >= dwNextFrameTime ? 1 : dwNextFrameTime - dwCurrentTime);
-            dwFrameStartTime = SDL_GetTicks();
-
-            if (g_InputState.dwKeyPress & (kKeyMenu | kKeySearch))
-            {
-                fEndPlay = TRUE;
-            }
-            break;
-
-        case AVI_01wb:
-            //
-            // Audio data, just convert it & feed into buffer
-            //
-            PAL_AVIFeedAudio(avi, chunk->data, chunk->header.length);
-			//
-			// Only enable AVI audio when data are available
-			// We do not lock on the 'if' because only this function changes 'avi->fp'
-			//
-			if (!avi->fp)
-			{
-				SDL_mutexP(avi->selfMutex);
-				avi->fp = fp;
-				SDL_mutexV(avi->selfMutex);
-			}
-            break;
-        }
-
-        if (chunk != buf) free(chunk);
+      if (g_InputState.dwKeyPress & (kKeyMenu | kKeySearch))
+        end = TRUE;
+    } else if (c->header.type == AVI_01wb) {
+      SDL_PutAudioStreamData(g_avi.stream, c->data, c->header.length);
     }
+    if (c != (RIFFChunk *)g_avi.chunkBuf)
+      free(c);
+  }
 
-	SDL_mutexP(avi->selfMutex);
-	avi->fp = NULL;
-	SDL_mutexV(avi->selfMutex);
-
-    if (fEndPlay)
-    {
-        //
-        // Simulate a short delay (like the original game)
-        //
-        UTIL_Delay(500);
-    }
-
-    VIDEO_ChangeDepth(0);
-
-	if (avi->surface != NULL)
-	{
-		SDL_FreeSurface(avi->surface);
-		avi->surface = NULL;
-	}
-
-	if (avi->pChunkBuffer)
-	{
-		free(avi->pChunkBuffer);
-		avi->pChunkBuffer = NULL;
-	}
-
-	if (avi->pbAudioBuf)
-	{
-		free(avi->pbAudioBuf);
-		avi->pbAudioBuf = NULL;
-	}
-
-	fclose(fp);
-
-	return TRUE;
-}
-
-VOID SDLCALL
-AVI_FillAudioBuffer(
-	void       *udata,
-	uint8_t    *stream,
-	int         len
-)
-{
-    AVIPlayState *avi = (AVIPlayState *)udata;
-
-    SDL_mutexP(avi->selfMutex);
-    while (avi->fp != NULL && len > 0 && avi->dwAudioWritePos != avi->dwAudioReadPos)
-    {
-        uint32_t fill_size = (avi->dwAudioReadPos + len > avi->dwAudBufLen) ? avi->dwAudBufLen - avi->dwAudioReadPos : len;
-
-        if (avi->dwAudioWritePos > avi->dwAudioReadPos &&
-            fill_size > avi->dwAudioWritePos - avi->dwAudioReadPos)
-        {
-            fill_size = avi->dwAudioWritePos - avi->dwAudioReadPos;
-        }
-
-        memcpy(stream, avi->pbAudioBuf + avi->dwAudioReadPos, fill_size);
-
-        avi->dwAudioReadPos = (avi->dwAudioReadPos + fill_size) % avi->dwAudBufLen;
-
-        stream += fill_size;
-        len -= fill_size;
-    }
-    SDL_mutexV(avi->selfMutex);
-}
-
-void *
-AVI_GetPlayState(
-	void
-)
-{
-	return &gAVIPlayState;
+  if (g_avi.surface) {
+    SDL_DestroySurface(g_avi.surface);
+    g_avi.surface = NULL;
+  }
+  if (g_avi.chunkBuf) {
+    free(g_avi.chunkBuf);
+    g_avi.chunkBuf = NULL;
+  }
+  if (g_avi.stream) {
+    SDL_DestroyAudioStream(g_avi.stream);
+    g_avi.stream = NULL;
+  }
+  fclose(fp);
+  return TRUE;
 }

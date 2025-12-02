@@ -25,309 +25,202 @@
 #include "global.h"
 #include "uibattle.h"
 
-#define       BATTLE_FPS               25
-#define       BATTLE_FRAME_TIME        (1000 / BATTLE_FPS)
+#define BATTLE_FPS 25
+#define BATTLE_FRAME_TIME (1000 / BATTLE_FPS)
 
-typedef enum tagBATTLERESULT
-{
-   kBattleResultWon        = 3,      // player won the battle
-   kBattleResultLost       = 1,      // player lost the battle
-   kBattleResultFleed      = 0xFFFF, // player fleed from the battle
-   kBattleResultTerminated = 0,      // battle terminated with scripts
-   kBattleResultOnGoing    = 1000,   // the battle is ongoing
-   kBattleResultPreBattle  = 1001,   // running pre-battle scripts
-   kBattleResultPause      = 1002,   // battle pause
+typedef enum tagBATTLERESULT {
+  kBattleResultWon = 3,          // 玩家赢得战斗
+  kBattleResultLost = 1,         // 玩家输掉战斗
+  kBattleResultFleed = 0xFFFF,   // 玩家从战斗中逃跑
+  kBattleResultTerminated = 0,   // 战斗因脚本执行而终止（如剧情强制结束）
+  kBattleResultOnGoing = 1000,   // 战斗正在进行中
+  kBattleResultPreBattle = 1001, // 正在运行战前脚本
+  kBattleResultPause = 1002,     // 战斗暂停, 运行玩家愤怒脚本
 } BATTLERESULT;
 
-typedef enum tagFIGHTERSTATE
-{
-   kFighterWait,  // waiting time
-   kFighterCom,   // accepting command
-   kFighterAct,   // doing the actual move
+typedef enum tagFIGHTERSTATE {
+  kFighterWait, // 等待状态
+  kFighterCom,  // 指令状态, 行动条已满, 等待玩家选择
+  kFighterAct,  // 已确定动作指令
 } FIGHTERSTATE;
 
-typedef enum tagBATTLEACTIONTYPE
-{
-   kBattleActionPass,          // do nothing
-   kBattleActionDefend,        // defend
-   kBattleActionAttack,        // physical attack
-   kBattleActionMagic,         // use magic
-   kBattleActionCoopMagic,     // use cooperative magic
-   kBattleActionFlee,          // flee from the battle
-   kBattleActionThrowItem,     // throw item onto enemy
-   kBattleActionUseItem,       // use item
-   kBattleActionAttackMate,    // attack teammate (confused only)
+typedef enum tagBATTLEACTIONTYPE {
+  kBattleActionPass,       // 跳过
+  kBattleActionDefend,     // 防御
+  kBattleActionAttack,     // 普攻
+  kBattleActionMagic,      // 法术
+  kBattleActionCoopMagic,  // 合体
+  kBattleActionFlee,       // 逃跑
+  kBattleActionThrowItem,  // 投掷物品
+  kBattleActionUseItem,    // 使用物品
+  kBattleActionAttackMate, // 攻击友方
 } BATTLEACTIONTYPE;
 
-typedef struct tagBATTLEACTION
-{
-   BATTLEACTIONTYPE   ActionType;
-   WORD               wActionID;   // item/magic to use
-   SHORT              sTarget;     // -1 for everyone
-   FLOAT              flRemainingTime;  // remaining waiting time before the action start
+typedef struct tagBATTLEACTION {
+  BATTLEACTIONTYPE ActionType; // 动作类型
+  WORD wActionID;              // 要使用的物品或仙术的ID
+  SHORT sTarget;               // 目标ID（-1 代表全体）
 } BATTLEACTION;
 
-typedef struct tagBATTLEENEMY
-{
-   WORD               wObjectID;              // Object ID of this enemy
-   ENEMY              e;                      // detailed data of this enemy
-   WORD               rgwStatus[kStatusAll];  // status effects
-   FLOAT              flTimeMeter;            // time-charging meter (0 = empty, 100 = full).
-   POISONSTATUS       rgPoisons[MAX_POISONS]; // poisons
-   LPSPRITE           lpSprite;
-   PAL_POS            pos;                    // current position on the screen
-   PAL_POS            posOriginal;            // original position on the screen
-   WORD               wCurrentFrame;          // current frame number
-   FIGHTERSTATE       state;                  // state of this enemy
+typedef struct tagBATTLEENEMY {
+  WORD wObjectID;                      // 该敌人的对象ID (0 为 KO'ed)
+  ENEMY_T e;                           // 该敌人的详细属性 (从 ENEMY 复制)
+  WORD rgwStatus[kStatusAll];          // 状态效果数组
+  POISONSTATUS rgPoisons[MAX_POISONS]; // 中毒状态数组
+  WORD wScriptOnTurnStart;             // 回合开始时执行的脚本ID (从 OBJECT 复制)
+  WORD wScriptOnBattleEnd;             // 战斗结束时执行的脚本ID
+  WORD wScriptOnReady;                 // 敌人就绪时执行的脚本ID
 
-#ifndef PAL_CLASSIC
-   BOOL               fTurnStart;
-   BOOL               fFirstMoveDone;
-   BOOL               fDualMove;
-#endif
-
-   WORD               wScriptOnTurnStart;
-   WORD               wScriptOnBattleEnd;
-   WORD               wScriptOnReady;
-
-   WORD               wPrevHP;              // HP value prior to action
-
-   INT                iColorShift;
+  LPSPRITE lpSprite;
+  PAL_POS pos;         // 屏幕上的当前坐标
+  PAL_POS posOriginal; // 屏幕上的原始坐标
+  WORD wCurrentFrame;  // 当前动画帧号
+  WORD wPrevHP;        // 行动前的 HP (用于计算扣血动画)
+  INT iColorShift;     // 颜色偏移值（用于受击变色等效果）
 } BATTLEENEMY;
 
-// We only put some data used in battle here; other data can be accessed in the global data.
-typedef struct tagBATTLEPLAYER
-{
-   INT                iColorShift;
-   FLOAT              flTimeMeter;          // time-charging meter (0 = empty, 100 = full).
-   FLOAT              flTimeSpeedModifier;
-   WORD               wHidingTime;          // remaining hiding time
-   LPSPRITE           lpSprite;
-   PAL_POS            pos;                  // current position on the screen
-   PAL_POS            posOriginal;          // original position on the screen
-   WORD               wCurrentFrame;        // current frame number
-   FIGHTERSTATE       state;                // state of this player
-   BATTLEACTION       action;               // action to perform
-   BATTLEACTION       prevAction;           // action of the previous turn
-   BOOL               fDefending;           // TRUE if player is defending
-   BOOL               fSecondAttack;           // FALSE for the first full attack, TRUE for the second full attack
-   WORD               wPrevHP;              // HP value prior to action
-   WORD               wPrevMP;              // MP value prior to action
-#ifndef PAL_CLASSIC
-   SHORT              sTurnOrder;           // turn order
-#endif
+// 只在这里放置一些战斗专用的数据, 其他数据可以在全局数据中访问
+typedef struct tagBATTLEPLAYER {
+  BATTLEACTION action;     // 要执行的动作
+  BATTLEACTION prevAction; // 上一回合的动作（用于“重复”功能）
+
+  LPSPRITE lpSprite;
+  PAL_POS pos;         // 屏幕上的当前坐标
+  PAL_POS posOriginal; // 屏幕上的原始坐标
+  WORD wCurrentFrame;  // 当前动画帧号
+  FIGHTERSTATE state;  // 战斗状态（等待/行动中等）
+  BOOL fDefending;     // 处于防御状态
+  BOOL fSecondAttack;  // 双次攻击状态
+  WORD wPrevHP;        // 行动前的 HP
+  WORD wPrevMP;        // 行动前的 MP
+  INT iColorShift;     // 颜色偏移值
 } BATTLEPLAYER;
 
-typedef enum tagBATTLESPRITETYPE
-{
-   kBattleSpriteTypeNone,
-   kBattleSpriteTypeEnemy,
-   kBattleSpriteTypePlayer,
-   kBattleSpriteTypeMagic,
+typedef enum tagBATTLESPRITETYPE {
+  kBattleSpriteTypeEnemy,  // 敌人
+  kBattleSpriteTypePlayer, // 玩家
+  kBattleSpriteTypeMagic,  // 仙术特效
 } BATTLESPRITETYPE;
 
-typedef struct tagBATTLESPRITESEQ
-{
-   WORD               wType;
-   WORD               wObjectIndex;
-   PAL_POS            pos;
-   SHORT              sLayerOffset;
-   BOOL               fHaveColorShift;
-} BATTLESPRITESEQ;
+typedef struct tagBATTLESPRITE {
+  BATTLESPRITETYPE wType; // 精灵类型
+  WORD wObjectIndex;      // 对象索引
+  PAL_POS pos;            // 坐标位置
+  SHORT sLayerOffset;     // 图层偏移量（处理遮挡关系）
+  BOOL fHaveColorShift;   // 是否应用了颜色偏移
+} BATTLESPRITE;
 
 #define MAX_BATTLE_MAGICSPRITE_ITEMS 3
-#define MAX_BATTLESPRITESEQ_ITEMS (MAX_ENEMIES_IN_TEAM + MAX_PLAYABLE_PLAYER_ROLES + MAX_BATTLE_MAGICSPRITE_ITEMS)
+#define MAX_BATTLESPRITE_ITEMS (MAX_ENEMIES_IN_TEAM + MAX_PLAYABLE_PLAYER_ROLES + MAX_BATTLE_MAGICSPRITE_ITEMS)
 
-typedef struct tagSUMMON
-{
-   LPSPRITE           lpSprite;
-   WORD               wCurrentFrame;
+typedef struct tagSUMMON {
+  LPSPRITE lpSprite;  // 召唤灵/酒神的精灵指针
+  WORD wCurrentFrame; // 当前帧号
 } SUMMON;
 
-#define MAX_BATTLE_ACTIONS    256
-#define MAX_KILLED_ENEMIES    256
+#define MAX_BATTLE_ACTIONS 256
+#define MAX_KILLED_ENEMIES 256
 
-#ifdef PAL_CLASSIC
-
-typedef enum tabBATTLEPHASE
-{
-   kBattlePhaseSelectAction,
-   kBattlePhasePerformAction
+typedef enum tabBATTLEPHASE {
+  kBattlePhaseSelectAction,  // 选择动作阶段（等待玩家输入）
+  kBattlePhasePerformAction, // 执行动作阶段（播放动画/计算伤害）
 } BATTLEPHASE;
 
-typedef struct tagACTIONQUEUE
-{
-   BOOL       fIsEnemy;
-   WORD       wDexterity;
-   WORD       wIndex;
-   BOOL       fIsSecond;
+typedef struct tagACTIONQUEUE {
+  BOOL fIsEnemy;   // 是否为敌人
+  WORD wDexterity; // 身法/速度值（决定行动顺序）
+  WORD wIndex;     // 角色在对应数组中的索引
+  BOOL fIsSecond;  // 是否为该角色的第二次行动
 } ACTIONQUEUE;
 
 #define MAX_ACTIONQUEUE_ITEMS (MAX_PLAYERS_IN_PARTY + MAX_ENEMIES_IN_TEAM * 2)
 
-#endif
+typedef struct tagBATTLE {
 
-typedef struct tagBATTLE
-{
-   BATTLEPLAYER     rgPlayer[MAX_PLAYERS_IN_PARTY];
-   BATTLEENEMY      rgEnemy[MAX_ENEMIES_IN_TEAM];
+  SDL_Surface *lpSceneBuf;     // 场景缓冲表面（用于合成画面）
+  SDL_Surface *lpBackground;   // 战斗背景图片
+  SHORT sBackgroundColorShift; // 背景颜色偏移值
 
-   WORD             wMaxEnemyIndex;
+  LPSPRITE lpSummonSprite; // 召唤灵的精灵图像
+  PAL_POS posSummon;       // 召唤灵的坐标
+  INT iSummonFrame;        // 召唤灵的当前帧
+  BOOL fSummonColorShift;  // 召唤灵是否变色
 
-   SDL_Surface     *lpSceneBuf;
-   SDL_Surface     *lpBackground;
+  BATTLEUI UI;                // 战斗用户界面数据
+  LPBYTE lpEffectSprite;      // 特效精灵数据指针
+  LPCBITMAPRLE lpMagicBitmap; // 当前仙术帧的位图（RLE压缩格式）
+  int iBlow;                  // 风吹/击飞效果参数
 
-   SHORT            sBackgroundColorShift;
+  BATTLESPRITE SpriteDrawSeq[MAX_BATTLESPRITE_ITEMS]; // 精灵绘制序列
+  WORD spriteDrawSeqSize;                             // 绘制序列的最大索引
+  BOOL fSpriteAddLock;                                // 精灵添加锁
 
-   LPSPRITE         lpSummonSprite;       // sprite of summoned god
-   PAL_POS          posSummon;
-   INT              iSummonFrame;         // current frame of the summoned god
-   BOOL             fSummonColorShift;
+  BATTLEPLAYER rgPlayer[MAX_PLAYERS_IN_PARTY];    // 玩家角色数组
+  BATTLEENEMY rgEnemy[MAX_ENEMIES_IN_TEAM];       // 敌人角色数组
+  WORD wMaxEnemyIndex;                            // 敌人的最大索引值
+  ACTIONQUEUE ActionQueue[MAX_ACTIONQUEUE_ITEMS]; // 动作队列（决定出手顺序）
+  int iCurAction;                                 // 当前正在执行的动作索引
+  BATTLEPHASE Phase;                              // 当前战斗阶段
+  BATTLERESULT BattleResult;                      // 战斗结果状态
+  INT iExpGained;                                 // 获得的经验总值
+  INT iCashGained;                                // 获得的金钱总值
+  INT iHidingTime;                                // 隐身效果剩余回合
+  BOOL fIsBoss;                                   // 是否是 BOSS 战
+  BOOL fEnemyCleared;                             // 敌人是否已被清除
+  BOOL fEnemyMoving;                              // 敌人正在行动中
+  WORD wMovingPlayerIndex;                        // 当前正在行动的玩家
+  BOOL fRepeat;                                   // 玩家按下了重复
+  BOOL fForce;                                    // 玩家按下了自动战斗
+  BOOL fFlee;                                     // 玩家按下了逃跑
+  BOOL fPrevAutoAtk;                              // 上一回合是否使用了自动攻击
+  BOOL fPrevPlayerAutoAtk;                        // 上一个玩家在同一回合是否使用了自动攻击
 
-   INT              iExpGained;           // total experience value gained
-   INT              iCashGained;          // total cash gained
+  WORD coopContributors[MAX_PLAYERS_IN_PARTY]; // 合击技贡献者列表
+  BOOL fThisTurnCoop;                          // 本回合是否触发了合击
 
-   BOOL             fIsBoss;              // TRUE if boss fight
-   BOOL             fEnemyCleared;        // TRUE if enemies are cleared
-   BATTLERESULT     BattleResult;
-
-   FLOAT            flTimeChargingUnit;   // the base waiting time unit
-
-   BATTLEUI         UI;
-
-   LPBYTE           lpEffectSprite;
-
-   BOOL             fEnemyMoving;         // TRUE if enemy is moving
-
-   INT              iHidingTime;          // Time of hiding
-
-   WORD             wMovingPlayerIndex;   // current moving player index
-
-   int              iBlow;
-
-   LPCBITMAPRLE     lpMagicBitmap;        // current magic frame bitmap
-
-   BATTLESPRITESEQ  SpriteDrawSeq[MAX_BATTLESPRITESEQ_ITEMS];
-   WORD             wMaxSpriteDrawSeqIndex;
-   BOOL             fSpriteAddLock;
-
-#ifdef PAL_CLASSIC
-   BATTLEPHASE      Phase;
-   ACTIONQUEUE      ActionQueue[MAX_ACTIONQUEUE_ITEMS];
-   int              iCurAction;
-   BOOL             fRepeat;              // TRUE if player pressed Repeat
-   BOOL             fForce;               // TRUE if player pressed Force
-   BOOL             fFlee;                // TRUE if player pressed Flee
-   BOOL             fPrevAutoAtk;         // TRUE if auto-attack was used in the previous turn
-   BOOL             fPrevPlayerAutoAtk;   // TRUE if auto-attack was used by previous player in the same turn
-
-   WORD             coopContributors[MAX_PLAYERS_IN_PARTY];
-   BOOL             fThisTurnCoop;
-#endif
 } BATTLE;
+
+#define BATTLE_PLAYER g_Battle.rgPlayer
+#define BATTLE_ENEMY g_Battle.rgEnemy
 
 PAL_C_LINKAGE_BEGIN
 
 extern BATTLE g_Battle;
 
-VOID
-PAL_LoadBattleSprites(
-   VOID
-);
+VOID PAL_LoadBattleSprites(VOID);
 
-VOID
-PAL_BattleDrawBackground(
-   VOID
-);
+VOID PAL_BattleDrawBackground(VOID);
 
-VOID
-PAL_BattleDrawEnemySprites(
-   WORD              wEnemyIndex,
-   SDL_Surface      *lpDstSurface
-);
+VOID PAL_BattleDrawEnemySprites(WORD wEnemyIndex, SDL_Surface *lpDstSurface);
 
-VOID
-PAL_BattleDrawPlayerSprites(
-   WORD              wPlayerIndex,
-   SDL_Surface      *lpDstSurface
-);
+VOID PAL_BattleDrawPlayerSprites(WORD wPlayerIndex, SDL_Surface *lpDstSurface);
 
-VOID
-PAL_BattleDrawMagicSprites(
-   INT               iMagicNum,
-   SDL_Surface      *lpDstSurface,
-   PAL_POS           pos
-);
+VOID PAL_BattleDrawMagicSprites(INT iMagicNum, SDL_Surface *lpDstSurface, PAL_POS pos);
 
-VOID
-PAL_BattleClearSpriteObject(
-   VOID
-);
+VOID PAL_BattleClearSpriteObject(VOID);
 
-VOID
-PAL_BattleSpriteAddUnlock(
-   VOID
-);
+VOID PAL_BattleSpriteAddUnlock(VOID);
 
-VOID
-PAL_BattleAddSpriteObject(
-   WORD               wType,
-   WORD               wObjectIndex,
-   PAL_POS            pos,
-   SHORT              sLayerOffset,
-   BOOL               fHaveColorShift
-);
+VOID PAL_BattleAddSpriteObject(WORD wType, WORD wObjectIndex, PAL_POS pos, SHORT sLayerOffset, BOOL fHaveColorShift);
 
-VOID
-PAL_BattleRemoveSpriteObject(
-   WORD               wSpriteObjectIndex
-);
+VOID PAL_BattleAddFighterSpriteObject(VOID);
 
-VOID
-PAL_BattleAddFighterSpriteObject(
-   VOID
-);
+VOID PAL_BattleSortSpriteObjecByPos(VOID);
 
-VOID
-PAL_BattleSortSpriteObjecByPos(
-   VOID
-);
+VOID PAL_BattleDrawAllSprites(VOID);
 
-VOID
-PAL_BattleDrawAllSprites(
-   VOID
-);
+VOID PAL_BattleDrawAllSpritesWithColorShift(BOOL fColorShift);
 
-VOID
-PAL_BattleDrawAllSpritesWithColorShift(
-   BOOL               fColorShift
-);
+VOID PAL_BattleMakeScene(VOID);
 
-VOID
-PAL_BattleMakeScene(
-   VOID
-);
+VOID PAL_BattleFadeScene(VOID);
 
-VOID
-PAL_BattleFadeScene(
-   VOID
-);
+VOID PAL_BattleEnemyEscape(VOID);
 
-VOID
-PAL_BattleEnemyEscape(
-   VOID
-);
-
-VOID
-PAL_BattlePlayerEscape(
-   VOID
-);
+VOID PAL_BattlePlayerEscape(VOID);
 
 BATTLERESULT
-PAL_StartBattle(
-   WORD        wEnemyTeam,
-   BOOL        fIsBoss
-);
+PAL_StartBattle(WORD wEnemyTeam, BOOL fIsBoss);
 
 PAL_C_LINKAGE_END
 

@@ -24,217 +24,46 @@
 
 #include "common.h"
 
-typedef enum tagDIALOGPOSITION
-{
-   kDialogUpper       = 0,
-   kDialogCenter,
-   kDialogLower,
-   kDialogCenterWindow
-} DIALOGLOCATION;
-
-typedef enum tagFONTFLAVOR
-{
-   kFontFlavorAuto     = 0,
-   kFontFlavorUnifont,
-   kFontFlavorSimpChin,
-   kFontFlavorTradChin,
-   kFontFlavorJapanese,
-} FONTFLAVOR;
+typedef enum tagDIALOGPOSITION { kDialogUpper = 0, kDialogCenter, kDialogLower, kDialogCenterWindow } DIALOGLOCATION;
 
 PAL_C_LINKAGE_BEGIN
 
-typedef struct tagTEXTLIB
-{
-    LPWSTR         *lpWordBuf;
-    LPWSTR         *lpMsgBuf;
-    int           ***lpIndexBuf; 
-	
-	int            *indexMaxCounter;
-	// The variable indexMaxCounter stores the value of (item->indexEnd - item->index), 
-	// which means the span between eid and sid. 
-		
-    BOOL            fUseISOFont;
-	int             iFontFlavor;
+BOOL PAL_InitFont();
 
-    int             nWords;
-    int             nMsgs;
-    int             nIndices;
+int PAL_CharWidth(uint16_t wChar);
 
-    int             nCurrentDialogLine;
-    BYTE            bCurrentFontColor;
-    PAL_POS         posIcon;
-    PAL_POS         posDialogTitle;
-    PAL_POS         posDialogText;
-    BYTE            bDialogPosition;
-    BYTE            bIcon;
-    int             iDelayTime;
-    INT             iDialogShadow;
-    BOOL            fUserSkip;
-    BOOL            fPlayingRNG;
+INT PAL_TextWidth(LPCWSTR text);
 
-    BYTE            bufDialogIcons[282];
-} TEXTLIB, *LPTEXTLIB;
+INT PAL_WordWidth(INT nWordIndex);
 
-extern TEXTLIB         g_TextLib;
-
-extern LPWSTR g_rcCredits[12];
-
-INT
-PAL_InitText(
-   VOID
-);
-
-VOID
-PAL_FreeText(
-   VOID
-);
+INT PAL_InitText(VOID);
 
 LPCWSTR
-PAL_GetWord(
-   int        iNumWord
-);
+PAL_GetWord(int iNumWord);
 
 LPCWSTR
-PAL_GetMsg(
-   int        iNumMsg
-);
+PAL_GetMsg(int iNumMsg);
 
-int
-PAL_GetMsgNum(
-   int        iIndex,
-   int        iSpan,
-   int        iOrder
-);
+VOID PAL_DrawText(LPCWSTR lpszText, PAL_POS pos, BYTE bColor, BOOL fShadow, BOOL fUpdate);
 
-LPWSTR
-PAL_UnescapeText(
-   LPCWSTR    lpszText
-);
+VOID PAL_StartDialog(BYTE bDialogLocation, BYTE bFontColor, INT iNumCharFace, BOOL fPlayingRNG);
 
-VOID
-PAL_DrawText(
-   LPCWSTR    lpszText,
-   PAL_POS    pos,
-   BYTE       bColor,
-   BOOL       fShadow,
-   BOOL       fUpdate,
-   BOOL       fUse8x8Font
-);
+VOID PAL_StartDialogWithOffset(BYTE bDialogLocation, BYTE bFontColor, INT iNumCharFace, BOOL fPlayingRNG, INT xOff,
+                               INT yOff);
 
-VOID
-PAL_DrawTextUnescape(
-   LPCWSTR    lpszText,
-   PAL_POS    pos,
-   BYTE       bColor,
-   BOOL       fShadow,
-   BOOL       fUpdate,
-   BOOL       fUse8x8Font,
-   BOOL       fUnescape
-);
+VOID PAL_ShowDialogText(LPCWSTR lpszText);
 
-VOID
-PAL_DialogSetDelayTime(
-   INT          iDelayTime
-);
+VOID PAL_ClearDialog(BOOL fWaitForKey);
 
-VOID
-PAL_StartDialog(
-   BYTE         bDialogLocation,
-   BYTE         bFontColor,
-   INT          iNumCharFace,
-   BOOL         fPlayingRNG
-);
+VOID PAL_EndDialog(VOID);
 
-VOID
-PAL_StartDialogWithOffset(
-   BYTE         bDialogLocation,
-   BYTE         bFontColor,
-   INT          iNumCharFace,
-   BOOL         fPlayingRNG,
-   INT          xOff,
-   INT          yOff
-);
+BOOL PAL_IsInDialog(VOID);
 
-int
-TEXT_DisplayText(
-   LPCWSTR        lpszText,
-   int            x,
-   int            y,
-   BOOL           isDialog
-);
+BOOL PAL_DialogIsPlayingRNG(VOID);
 
-VOID
-PAL_ShowDialogText(
-   LPCWSTR    lpszText
-);
+VOID PAL_SetDialogShadow(int shadow);
 
-VOID
-PAL_ClearDialog(
-   BOOL         fWaitForKey
-);
-
-VOID
-PAL_EndDialog(
-   VOID
-);
-
-BOOL
-PAL_IsInDialog(
-   VOID
-);
-
-BOOL
-PAL_DialogIsPlayingRNG(
-   VOID
-);
-
-INT
-PAL_MultiByteToWideChar(
-   LPCSTR        mbs,
-   int           mbslength,
-   LPWSTR        wcs,
-   int           wcslength
-);
-
-INT
-PAL_MultiByteToWideCharCP(
-	CODEPAGE      cp,
-	LPCSTR        mbs,
-	size_t        mbslength,
-	LPWSTR        wcs,
-	size_t        wcslength
-	);
-
-WCHAR
-PAL_GetInvalidChar(
-   CODEPAGE      uCodePage
-);
-
-CODEPAGE
-PAL_GetCodePage(
-	void
-);
-
-void
-PAL_SetCodePage(
-	CODEPAGE    uCodePage
-);
-
-CODEPAGE
-PAL_DetectCodePageForString(
-	const char *   text,
-	size_t         text_len,
-	CODEPAGE       default_cp,
-	int *          probability
-);
-
-INT
-PAL_swprintf(
-	LPWSTR buffer,
-	size_t count,
-	LPCWSTR format,
-	...
-);
+INT PAL_swprintf(LPWSTR buffer, size_t count, LPCWSTR format, ...);
 
 PAL_C_LINKAGE_END
 
