@@ -26,6 +26,13 @@
 #include "palcfg.h"
 #include <math.h>
 
+typedef struct tagAUDIODEVICE {
+  SDL_AudioDeviceID id;
+  SDL_AudioSpec spec; /* Actual-used sound specification */
+  BOOL fMusicEnabled; /* Is BGM enabled? */
+  BOOL fSoundEnabled; /* Is sound effect enabled? */
+} AUDIODEVICE;
+
 static AUDIODEVICE gAudioDevice;
 
 SDL_AudioDeviceID AUDIO_GetDeviceID(VOID) { return gAudioDevice.id; }
@@ -44,11 +51,11 @@ INT AUDIO_Init(VOID) {
     return -3;
 
   // Initialize the sound subsystem.
-  gAudioDevice.pSoundPlayer = SOUND_Init();
+  SOUND_Init();
 
   // Initialize the music subsystem.
   char buf[PATH_MAX];
-  gAudioDevice.pMusPlayer = RIX_Init(UTIL_GetFullPathName(buf, PATH_MAX, gConfig.pszGamePath, "mus.mkf"));
+  RIX_Init(UTIL_GetFullPathName(buf, PATH_MAX, gConfig.pszGamePath, "mus.mkf"));
 
   // Let the callback function run so that musics will be played.
   SDL_ResumeAudioDevice(gAudioDevice.id);
@@ -57,27 +64,15 @@ INT AUDIO_Init(VOID) {
 }
 
 VOID AUDIO_Shutdown(VOID) {
-  if (gAudioDevice.pSoundPlayer != NULL) {
-    SOUND_Shutdown(gAudioDevice.pSoundPlayer);
-    gAudioDevice.pSoundPlayer = NULL;
-  }
-  if (gAudioDevice.pMusPlayer) {
-    RIX_Shutdown(gAudioDevice.pMusPlayer);
-    gAudioDevice.pMusPlayer = NULL;
-  }
+  SOUND_Shutdown();
+  RIX_Shutdown();
 }
 
 SDL_AudioSpec *AUDIO_GetDeviceSpec(VOID) { return &gAudioDevice.spec; }
 
-VOID AUDIO_PlaySound(INT iSoundNum) {
-  if (gAudioDevice.pSoundPlayer)
-    SOUND_Play(gAudioDevice.pSoundPlayer, abs(iSoundNum), FALSE, 0.0f);
-}
+VOID AUDIO_PlaySound(INT iSoundNum) { SOUND_Play(abs(iSoundNum), FALSE, 0.0f); }
 
-VOID AUDIO_PlayMusic(INT iNumRIX, BOOL fLoop, FLOAT flFadeTime) {
-  if (gAudioDevice.pMusPlayer)
-    RIX_Play(gAudioDevice.pMusPlayer, iNumRIX, fLoop, flFadeTime);
-}
+VOID AUDIO_PlayMusic(INT iNumRIX, BOOL fLoop, FLOAT flFadeTime) { RIX_Play(iNumRIX, fLoop, flFadeTime); }
 
 VOID AUDIO_EnableMusic(BOOL fEnable) { gAudioDevice.fMusicEnabled = fEnable; }
 

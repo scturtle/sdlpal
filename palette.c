@@ -23,7 +23,6 @@
 
 SDL_Color *PAL_GetPalette(INT iPaletteNum, BOOL fNight) {
   static SDL_Color palette[256];
-  memset(palette, 0xff, sizeof(SDL_Color) * 256);
 
   // Read the palette data from the pat.mkf file
   BYTE buf[1536];
@@ -42,6 +41,7 @@ SDL_Color *PAL_GetPalette(INT iPaletteNum, BOOL fNight) {
     palette[i].r = buf[(fNight ? 256 * 3 : 0) + i * 3] << 2;
     palette[i].g = buf[(fNight ? 256 * 3 : 0) + i * 3 + 1] << 2;
     palette[i].b = buf[(fNight ? 256 * 3 : 0) + i * 3 + 2] << 2;
+    palette[i].a = 255;
   }
 
   return palette;
@@ -60,7 +60,6 @@ VOID PAL_FadeOut(INT iDelay) {
     palette[i] = VIDEO_GetPalette()[i];
 
   SDL_Color newpalette[256];
-  memset(newpalette, 0xff, sizeof(SDL_Color) * 256);
 
   const int speedup = 1; // by scturtle
   Uint64 time = PAL_GetTicks() + iDelay * 10 * 60 / speedup;
@@ -73,6 +72,7 @@ VOID PAL_FadeOut(INT iDelay) {
       newpalette[i].r = (palette[i].r * j) >> 6;
       newpalette[i].g = (palette[i].g * j) >> 6;
       newpalette[i].b = (palette[i].b * j) >> 6;
+      newpalette[i].a = 255;
     }
 
     VIDEO_SetPalette(newpalette);
@@ -85,7 +85,6 @@ VOID PAL_FadeOut(INT iDelay) {
 
 VOID PAL_FadeIn(INT iPaletteNum, BOOL fNight, INT iDelay) {
   SDL_Color newpalette[256];
-  memset(newpalette, 0xff, sizeof(SDL_Color) * 256);
 
   // get the new palette
   SDL_Color *palette = PAL_GetPalette(iPaletteNum, fNight);
@@ -103,6 +102,7 @@ VOID PAL_FadeIn(INT iPaletteNum, BOOL fNight, INT iDelay) {
       newpalette[i].r = (palette[i].r * j) >> 6;
       newpalette[i].g = (palette[i].g * j) >> 6;
       newpalette[i].b = (palette[i].b * j) >> 6;
+      newpalette[i].a = 255;
     }
 
     VIDEO_SetPalette(newpalette);
@@ -113,24 +113,21 @@ VOID PAL_FadeIn(INT iPaletteNum, BOOL fNight, INT iDelay) {
 }
 
 VOID PAL_SceneFade(INT iPaletteNum, BOOL fNight, INT iStep) {
-  gNeedToFadeIn = FALSE;
-
-  SDL_Color newpalette[256];
-  memset(newpalette, 0xff, sizeof(SDL_Color) * 256);
-
-  SDL_Color *palette;
-  palette = PAL_GetPalette(iPaletteNum, fNight);
+  SDL_Color *palette = PAL_GetPalette(iPaletteNum, fNight);
   if (palette == NULL)
     return;
 
+  gNeedToFadeIn = FALSE;
+
   if (iStep == 0)
     iStep = 1;
-  int i = (iStep > 0) ? 0 : 63;
-  while ((iStep > 0 && i < 64) || (iStep < 0 && i >= 0)) {
-    for (int i = 0; i < 64; i += iStep) {
-      Uint64 time = PAL_GetTicks() + 100;
 
-      // Generate the scene
+  SDL_Color newpalette[256];
+
+  if (iStep > 0) {
+    for (int i = 0; i < 64; i += iStep) {
+      Uint64 time = SDL_GetTicks() + 100;
+
       PAL_ClearKeyState();
       g_InputState.dir = kDirUnknown;
       PAL_GameUpdate(FALSE);
@@ -141,16 +138,40 @@ VOID PAL_SceneFade(INT iPaletteNum, BOOL fNight, INT iStep) {
         newpalette[j].r = (palette[j].r * i) >> 6;
         newpalette[j].g = (palette[j].g * i) >> 6;
         newpalette[j].b = (palette[j].b * i) >> 6;
+        newpalette[j].a = 255;
       }
       VIDEO_SetPalette(newpalette);
 
       PAL_ProcessEvent();
-      while (!SDL_TICKS_PASSED(PAL_GetTicks(), time)) {
+      while (!SDL_TICKS_PASSED(SDL_GetTicks(), time)) {
         PAL_ProcessEvent();
-        PAL_Delay(5);
+        SDL_Delay(5);
       }
     }
-    i += iStep;
+  } else {
+    for (int i = 63; i >= 0; i += iStep) {
+      Uint64 time = SDL_GetTicks() + 100;
+
+      PAL_ClearKeyState();
+      g_InputState.dir = kDirUnknown;
+      PAL_GameUpdate(FALSE);
+      PAL_MakeScene();
+      VIDEO_UpdateScreen(NULL);
+
+      for (int j = 0; j < 256; j++) {
+        newpalette[j].r = (palette[j].r * i) >> 6;
+        newpalette[j].g = (palette[j].g * i) >> 6;
+        newpalette[j].b = (palette[j].b * i) >> 6;
+        newpalette[j].a = 255;
+      }
+      VIDEO_SetPalette(newpalette);
+
+      PAL_ProcessEvent();
+      while (!SDL_TICKS_PASSED(SDL_GetTicks(), time)) {
+        PAL_ProcessEvent();
+        SDL_Delay(5);
+      }
+    }
   }
 }
 
@@ -164,7 +185,6 @@ VOID PAL_PaletteFade(INT iPaletteNum, BOOL fNight, BOOL fUpdateScene) {
     palette[i] = VIDEO_GetPalette()[i];
 
   SDL_Color t[256];
-  memset(t, 0xff, sizeof(t));
 
   for (int i = 0; i < 32; i++) {
     Uint64 time = PAL_GetTicks() + (fUpdateScene ? FRAME_TIME : FRAME_TIME / 4);
@@ -173,6 +193,7 @@ VOID PAL_PaletteFade(INT iPaletteNum, BOOL fNight, BOOL fUpdateScene) {
       t[j].r = (BYTE)(((INT)(palette[j].r) * (31 - i) + (INT)(newpalette[j].r) * i) / 31);
       t[j].g = (BYTE)(((INT)(palette[j].g) * (31 - i) + (INT)(newpalette[j].g) * i) / 31);
       t[j].b = (BYTE)(((INT)(palette[j].b) * (31 - i) + (INT)(newpalette[j].b) * i) / 31);
+      t[j].a = 255;
     }
     VIDEO_SetPalette(t);
 
@@ -194,7 +215,6 @@ VOID PAL_PaletteFade(INT iPaletteNum, BOOL fNight, BOOL fUpdateScene) {
 
 VOID PAL_ColorFade(INT iDelay, BYTE bColor, BOOL fFrom) {
   SDL_Color newpalette[256];
-  memset(newpalette, 0xff, sizeof(SDL_Color) * 255);
 
   SDL_Color *palette = PAL_GetPalette(gCurPalette, gNightPalette);
 
@@ -226,18 +246,21 @@ VOID PAL_ColorFade(INT iDelay, BYTE bColor, BOOL fFrom) {
         newpalette[j].b -= 4;
       else if (newpalette[j].b < target.b)
         newpalette[j].b += 4;
+
+      newpalette[j].a = 255;
     }
 
     VIDEO_SetPalette(newpalette);
     UTIL_Delay(iDelay);
   }
 
-  if (!fFrom) {
+  if (fFrom) {
+    VIDEO_SetPalette(palette);
+  } else {
     for (int i = 0; i < 256; i++)
       newpalette[i] = palette[bColor];
+    VIDEO_SetPalette(newpalette);
   }
-
-  VIDEO_SetPalette(palette);
 }
 
 VOID PAL_FadeToRed(VOID) {

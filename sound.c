@@ -34,21 +34,24 @@ typedef struct tagWAVEDATA {
 typedef struct tagSOUNDPLAYER {
   FILE *mkf;
   WAVEDATA soundlist; /* 播放链表头 */
-} SOUNDPLAYER, *LPSOUNDPLAYER;
+} SOUNDPLAYER;
 
-BOOL SOUND_Play(VOID *object, INT iSoundNum, BOOL fLoop, FLOAT flFadeTime) {
-  LPSOUNDPLAYER player = (LPSOUNDPLAYER)object;
-  if (player == NULL)
-    return FALSE;
+static SOUNDPLAYER gSoundPlayer;
+
+VOID SOUND_Play(INT iSoundNum, BOOL fLoop, FLOAT flFadeTime) {
+  if (!AUDIO_SoundEnabled())
+    return;
+
+  SOUNDPLAYER *p = &gSoundPlayer;
 
   // 读取原始 WAV
-  int file_len = PAL_MKFGetChunkSize(iSoundNum, player->mkf);
+  int file_len = PAL_MKFGetChunkSize(iSoundNum, p->mkf);
   if (file_len <= 0)
-    return FALSE;
+    return;
   void *file_data = malloc(file_len);
   if (!file_data)
-    return FALSE;
-  PAL_MKFReadChunk(file_data, file_len, iSoundNum, player->mkf);
+    return;
+  PAL_MKFReadChunk(file_data, file_len, iSoundNum, p->mkf);
 
   // 解析 WAV
   SDL_AudioSpec src_spec;
@@ -56,7 +59,7 @@ BOOL SOUND_Play(VOID *object, INT iSoundNum, BOOL fLoop, FLOAT flFadeTime) {
   Uint32 wav_len = 0;
   if (!SDL_LoadWAV_IO(SDL_IOFromConstMem(file_data, file_len), true, &src_spec, &wav_buffer, &wav_len)) {
     free(file_data);
-    return FALSE;
+    return;
   }
 
   // 创建 stream
@@ -65,7 +68,7 @@ BOOL SOUND_Play(VOID *object, INT iSoundNum, BOOL fLoop, FLOAT flFadeTime) {
   if (!stream) {
     SDL_free(wav_buffer);
     free(file_data);
-    return FALSE;
+    return;
   }
 
   // 将音频数据推入流中
@@ -83,7 +86,7 @@ BOOL SOUND_Play(VOID *object, INT iSoundNum, BOOL fLoop, FLOAT flFadeTime) {
   node->stream = stream;
   node->next = NULL;
 
-  WAVEDATA *prev = &player->soundlist;
+  WAVEDATA *prev = &p->soundlist;
   WAVEDATA *curr = prev->next;
   while (curr) {
     // 清理
@@ -99,35 +102,27 @@ BOOL SOUND_Play(VOID *object, INT iSoundNum, BOOL fLoop, FLOAT flFadeTime) {
     }
   }
   prev->next = node;
-
-  return TRUE;
 }
 
-VOID *SOUND_Init(VOID) {
-  LPSOUNDPLAYER player = (LPSOUNDPLAYER)malloc(sizeof(SOUNDPLAYER));
-  if (!player)
-    return NULL;
-  player->mkf = UTIL_OpenRequiredFile("sounds.mkf");
-  player->soundlist.next = NULL;
-  player->soundlist.stream = NULL;
-  return player;
+VOID SOUND_Init(VOID) {
+  SOUNDPLAYER *p = &gSoundPlayer;
+  p->mkf = UTIL_OpenRequiredFile("sounds.mkf");
+  p->soundlist.next = NULL;
+  p->soundlist.stream = NULL;
 }
 
-VOID SOUND_Shutdown(VOID *object) {
-  LPSOUNDPLAYER player = (LPSOUNDPLAYER)object;
-  if (player) {
-    WAVEDATA *curr = player->soundlist.next;
-    while (curr) {
-      WAVEDATA *next = curr->next;
-      if (curr->stream)
-        SDL_DestroyAudioStream(curr->stream);
-      free(curr);
-      curr = next;
-    }
-    player->soundlist.next = NULL;
-
-    if (player->mkf)
-      fclose(player->mkf);
-    free(player);
+VOID SOUND_Shutdown() {
+  SOUNDPLAYER *p = &gSoundPlayer;
+  WAVEDATA *curr = p->soundlist.next;
+  while (curr) {
+    WAVEDATA *next = curr->next;
+    if (curr->stream)
+      SDL_DestroyAudioStream(curr->stream);
+    free(curr);
+    curr = next;
   }
+  p->soundlist.next = NULL;
+
+  if (p->mkf)
+    fclose(p->mkf);
 }

@@ -308,6 +308,9 @@ BOOL PAL_PlayAVI(LPCSTR path) {
     return FALSE;
   }
 
+  // stop bgm
+  AUDIO_PlayMusic(0, FALSE, 0);
+
   PAL_ClearKeyState();
   BOOL end = FALSE;
   uint64_t usDelta = 0, now = PAL_GetTicks(), start = now, next;

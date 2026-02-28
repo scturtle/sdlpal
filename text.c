@@ -46,6 +46,7 @@ static iconv_t cd;
 
 static char g_word_data[1 << 16];
 static LPWSTR g_word_ptr[600];
+static char g_msg_data[1 << 18];
 static DWORD g_msg_offset[13600];
 static int g_n_words;
 static int g_n_msgs;
@@ -157,6 +158,14 @@ INT PAL_InitText(VOID) {
   setlocale(LC_CTYPE, "UTF-8");
   cd = iconv_open("WCHAR_T", "GBK");
 
+  // read messages from m.msg
+  FILE *fpMsg = UTIL_OpenRequiredFile("m.msg");
+  fseek(fpMsg, 0, SEEK_END);
+  int msg_bs = ftell(fpMsg);
+  fseek(fpMsg, 0, SEEK_SET);
+  fread(g_msg_data, 1, msg_bs, fpMsg);
+  fclose(fpMsg);
+
   // read words from word.dat
   FILE *fpWord = UTIL_OpenRequiredFile("word.dat");
   fseek(fpWord, 0, SEEK_END);
@@ -200,17 +209,11 @@ LPCWSTR
 PAL_GetMsg(int iNumMsg) {
   if (iNumMsg >= g_n_msgs)
     return L"";
-
   int offset = g_msg_offset[iNumMsg];
   int length = g_msg_offset[iNumMsg + 1] - g_msg_offset[iNumMsg];
-
-  CHAR bef[1024];
-  FILE *fpMsg = UTIL_OpenRequiredFile("m.msg");
-  fseek(fpMsg, offset, SEEK_SET);
-  fread(bef, 1, length, fpMsg);
-
+  // convert from gbk to unicode
   static WCHAR cvt[1024];
-  int l = PAL_MultiByteToWideChar(bef, length, cvt, sizeof(cvt) / sizeof(WCHAR));
+  int l = PAL_MultiByteToWideChar(&g_msg_data[offset], length, cvt, sizeof(cvt) / sizeof(WCHAR));
   cvt[l] = 0;
   return cvt;
 }

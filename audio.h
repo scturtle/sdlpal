@@ -30,16 +30,6 @@
 
 PAL_C_LINKAGE_BEGIN
 
-typedef struct tagAUDIODEVICE {
-  SDL_AudioDeviceID id;
-  SDL_AudioSpec spec; /* Actual-used sound specification */
-  VOID *pMusPlayer;
-  VOID *pSoundPlayer;
-  SDL_AudioStream *mus_stream;
-  BOOL fMusicEnabled; /* Is BGM enabled? */
-  BOOL fSoundEnabled; /* Is sound effect enabled? */
-} AUDIODEVICE;
-
 INT AUDIO_Init(VOID);
 
 VOID AUDIO_Shutdown(VOID);
@@ -60,21 +50,21 @@ VOID AUDIO_EnableSound(BOOL fEnable);
 
 BOOL AUDIO_SoundEnabled(VOID);
 
-VOID *RIX_Init(LPCSTR szFileName);
+VOID RIX_Init(LPCSTR szFileName);
 
-VOID RIX_FillBuffer(VOID *object, LPBYTE stream, INT len);
+VOID RIX_FillBuffer(LPBYTE stream, INT len);
 
-BOOL RIX_Play(VOID *object, INT iNumRIX, BOOL fLoop, FLOAT flFadeTime);
+VOID RIX_Play(INT iNumRIX, BOOL fLoop, FLOAT flFadeTime);
 
-VOID RIX_Shutdown(VOID *object);
+VOID RIX_Shutdown(VOID);
 
-VOID *SOUND_Init(VOID);
+VOID SOUND_Init(VOID);
 
-VOID SOUND_Shutdown(VOID *object);
+VOID SOUND_Shutdown(VOID);
 
-VOID SOUND_FillBuffer(VOID *object, LPBYTE stream, INT len);
+VOID SOUND_FillBuffer(LPBYTE stream, INT len);
 
-BOOL SOUND_Play(VOID *object, INT iSoundNum, BOOL fLoop, FLOAT flFadeTime);
+VOID SOUND_Play(INT iSoundNum, BOOL fLoop, FLOAT flFadeTime);
 
 PAL_C_LINKAGE_END
 

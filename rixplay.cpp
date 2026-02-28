@@ -49,13 +49,15 @@ typedef struct tagRIXPLAYER {
 
   enum { NONE, FADE_IN, FADE_OUT } FadeType;
 
-} RIXPLAYER, *LPRIXPLAYER;
+} RIXPLAYER;
+
+static RIXPLAYER gRixPlayer;
 
 // SDL AudioStream 获取数据时的回调函数
 static void SDLCALL RIX_StreamCallback(void *userdata, SDL_AudioStream *stream, int additional_amount,
                                        int total_amount) {
-  LPRIXPLAYER p = (LPRIXPLAYER)userdata;
-  if (p == NULL || !AUDIO_MusicEnabled())
+  RIXPLAYER *p = &gRixPlayer;
+  if (!AUDIO_MusicEnabled())
     return;
 
   const int samples_per_tick = OPL_SAMPLE_RATE / 70;
@@ -83,6 +85,9 @@ static void SDLCALL RIX_StreamCallback(void *userdata, SDL_AudioStream *stream, 
         break;
       }
     }
+
+    if (p->iMusic == -1)
+      break;
 
     if (!p->rix->update()) {
       if (!p->fLoop) {
@@ -132,33 +137,20 @@ static void SDLCALL RIX_StreamCallback(void *userdata, SDL_AudioStream *stream, 
   }
 }
 
-VOID RIX_Shutdown(VOID *object) {
-  if (object != NULL) {
-    LPRIXPLAYER pRixPlayer = (LPRIXPLAYER)object;
-
-    if (pRixPlayer->stream) {
-      SDL_UnbindAudioStream(pRixPlayer->stream);
-      SDL_DestroyAudioStream(pRixPlayer->stream);
-      pRixPlayer->stream = NULL;
-    }
-
-    if (pRixPlayer->rix)
-      delete pRixPlayer->rix;
-    if (pRixPlayer->opl)
-      delete pRixPlayer->opl;
-
-    free(pRixPlayer);
+VOID RIX_Shutdown() {
+  if (gRixPlayer.stream) {
+    SDL_UnbindAudioStream(gRixPlayer.stream);
+    SDL_DestroyAudioStream(gRixPlayer.stream);
+    gRixPlayer.stream = NULL;
   }
+  if (gRixPlayer.rix)
+    delete gRixPlayer.rix;
+  if (gRixPlayer.opl)
+    delete gRixPlayer.opl;
 }
 
-BOOL RIX_Play(VOID *object, INT iNumRIX, BOOL fLoop, FLOAT flFadeTime) {
-  LPRIXPLAYER p = (LPRIXPLAYER)object;
-  if (!p)
-    return FALSE;
-  if ((iNumRIX == p->iMusic && p->iNextMusic == -1)) {
-    p->fLoop = fLoop;
-    return TRUE;
-  }
+VOID RIX_Play(INT iNumRIX, BOOL fLoop, FLOAT flFadeTime) {
+  RIXPLAYER *p = &gRixPlayer;
 
   // 音量淡化做在输入流 (OPL速率) 上
   int samples = (int)(flFadeTime * 0.5f * OPL_SAMPLE_RATE * AUDIO_CHANNELS);
@@ -167,69 +159,56 @@ BOOL RIX_Play(VOID *object, INT iNumRIX, BOOL fLoop, FLOAT flFadeTime) {
 
   p->iNextMusic = iNumRIX;
   p->fNextLoop = fLoop;
+
   p->FadeType = RIXPLAYER::FADE_OUT;
   p->dwStartFadeTime = PAL_GetTicks();
 
   p->iRemainingFadeSamples = samples;
   p->iTotalFadeOutSamples = samples;
   p->iTotalFadeInSamples = samples;
-
-  return TRUE;
 }
 
-VOID *RIX_Init(LPCSTR szFileName) {
+VOID RIX_Init(LPCSTR szFileName) {
   if (!szFileName)
-    return NULL;
+    return;
 
-  LPRIXPLAYER pRixPlayer = (LPRIXPLAYER)malloc(sizeof(RIXPLAYER));
-  if (!pRixPlayer)
-    return NULL;
-
-  memset(pRixPlayer, 0, sizeof(RIXPLAYER));
-
-  // pRixPlayer->opl = new CNemuopl(/*rate=*/OPL_SAMPLE_RATE);
-  pRixPlayer->opl = new CWemuopl(/*rate=*/OPL_SAMPLE_RATE, /*bit16=*/true, /*stereo=*/true);
-  if (!pRixPlayer->opl) {
-    free(pRixPlayer);
-    return NULL;
+  // gRixPlayer->opl = new CNemuopl(/*rate=*/OPL_SAMPLE_RATE);
+  gRixPlayer.opl = new CWemuopl(/*rate=*/OPL_SAMPLE_RATE, /*bit16=*/true, /*stereo=*/true);
+  if (!gRixPlayer.opl) {
+    return;
   }
 
-  pRixPlayer->rix = new CrixPlayer(pRixPlayer->opl);
-  if (!pRixPlayer->rix) {
-    delete pRixPlayer->opl;
-    free(pRixPlayer);
-    return NULL;
+  gRixPlayer.rix = new CrixPlayer(gRixPlayer.opl);
+  if (!gRixPlayer.rix) {
+    delete gRixPlayer.opl;
+    return;
   }
 
   // 加载 RIX 文件
-  if (!pRixPlayer->rix->load(szFileName, CProvider_Filesystem())) {
-    delete pRixPlayer->rix;
-    delete pRixPlayer->opl;
-    free(pRixPlayer);
-    return NULL;
+  if (!gRixPlayer.rix->load(szFileName, CProvider_Filesystem())) {
+    delete gRixPlayer.rix;
+    delete gRixPlayer.opl;
+    return;
   }
 
   SDL_AudioSpec srcSpec = {SDL_AUDIO_S16, AUDIO_CHANNELS, /*rate=*/OPL_SAMPLE_RATE};
   const SDL_AudioSpec *dstSpec = AUDIO_GetDeviceSpec();
 
   // 创建单一 Stream，用于完成速率转换及音频输出缓冲
-  pRixPlayer->stream = SDL_CreateAudioStream(&srcSpec, dstSpec);
-  if (!pRixPlayer->stream) {
-    delete pRixPlayer->rix;
-    delete pRixPlayer->opl;
-    free(pRixPlayer);
-    return NULL;
+  gRixPlayer.stream = SDL_CreateAudioStream(&srcSpec, dstSpec);
+  if (!gRixPlayer.stream) {
+    delete gRixPlayer.rix;
+    delete gRixPlayer.opl;
+    return;
   }
 
-  pRixPlayer->FadeType = RIXPLAYER::NONE;
-  pRixPlayer->iMusic = -1;
-  pRixPlayer->iNextMusic = -1;
-  pRixPlayer->fLoop = FALSE;
-  pRixPlayer->fNextLoop = FALSE;
+  gRixPlayer.FadeType = RIXPLAYER::NONE;
+  gRixPlayer.iMusic = -1;
+  gRixPlayer.iNextMusic = -1;
+  gRixPlayer.fLoop = FALSE;
+  gRixPlayer.fNextLoop = FALSE;
 
   // 设置流获取回调并绑定到音频设备
-  SDL_SetAudioStreamGetCallback(pRixPlayer->stream, RIX_StreamCallback, pRixPlayer);
-  SDL_BindAudioStream(AUDIO_GetDeviceID(), pRixPlayer->stream);
-
-  return pRixPlayer;
+  SDL_SetAudioStreamGetCallback(gRixPlayer.stream, RIX_StreamCallback, nullptr);
+  SDL_BindAudioStream(AUDIO_GetDeviceID(), gRixPlayer.stream);
 }
