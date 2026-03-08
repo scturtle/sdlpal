@@ -38,7 +38,7 @@ PAL_IsPlayerHealthy(
 
 INT
 PAL_BattleSelectAutoTarget(
-   VOID
+   WORD wMagic
 );
 
 VOID

@@ -62,7 +62,16 @@ static INT PAL_BattleSelectAutoTargetFrom(INT begin) {
   return -1;
 }
 
-INT PAL_BattleSelectAutoTarget(VOID) { return PAL_BattleSelectAutoTargetFrom(0); }
+INT PAL_BattleSelectAutoTarget(WORD wMagic) {
+  if (wMagic == 0) {
+    if (PAL_PlayerCanAttackAll(PARTY_PLAYER(g_Battle.UI.wCurPlayerIndex)))
+      return -1;
+  } else {
+    if (OBJECT[wMagic].magic.wFlags & kMagicFlagApplyToAll)
+      return -1;
+  }
+  return PAL_BattleSelectAutoTargetFrom(0);
+}
 
 // https://github.com/palxex/palresearch/blob/master/EXE/txts/%E9%9A%8F%E8%AE%B0.txt
 static SHORT PAL_CalcBaseDamage(WORD wAttackStrength, WORD wDefense) {

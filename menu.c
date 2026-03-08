@@ -101,6 +101,10 @@ WORD PAL_ItemSelectMenuUpdate(VOID) {
     return 0;
   gCurInvMenuItem = PAL_CalculateMenuNewIndex(gCurInvMenuItem, gNumInventory, iItemsPerLine, iLinesPerPage);
 
+  // cheat: add one to amount of current item // by scturtle
+  if (g_InputState.dwKeyPress & kKeyAuto)
+    g.rgInventory[gCurInvMenuItem].nAmount += 1;
+
   // Redraw the box
   PAL_CreateBoxWithShadow(PAL_XY(2, 0), iLinesPerPage - 1, 17, 1, FALSE, 0);
 
@@ -509,7 +513,7 @@ static WORD PAL_ReadMenu(LPITEMCHANGED_CALLBACK lpfnMenuItemChanged, LPCMENUITEM
 
     PAL_ProcessEvent();
 
-    if (g_InputState.dwKeyPress & (kKeyDown | kKeyRight | kKeyUp | kKeyLeft)) {
+    if (g_InputState.dwKeyPress & (kKeyDown | kKeyRight | kKeyUp | kKeyLeft | kKeyDefend)) {
       g_bRenderPaused = TRUE;
 
       // Dehighlight the unselected item.
@@ -1275,6 +1279,16 @@ static VOID PAL_BuyMenu_OnItemChange(WORD wCurrentItem) {
   VIDEO_UpdateScreen(&rect);
 
   __buymenu_firsttime_render = FALSE;
+
+  // display description of item to buy // by scturtle
+  if (g_InputState.dwKeyPress & kKeyDefend) {
+    VIDEO_BackupScreen(gpScreen);
+    PAL_RunDescScript(OBJECT[wCurrentItem].item.wScriptDesc, PAL_ITEM_DESC_BOTTOM);
+    VIDEO_UpdateScreen(NULL);
+    PAL_WaitForAnyKey(0);
+    VIDEO_RestoreScreen(gpScreen);
+    VIDEO_UpdateScreen(NULL);
+  }
 }
 
 VOID PAL_BuyMenu(WORD wStoreNum) {

@@ -200,6 +200,22 @@ VOID PAL_BattleUIPlayerReady(WORD wPlayerIndex) {
   g_Battle.UI.MenuState = kBattleMenuMain;
 }
 
+static VOID PAL_BattleUISetActionTarget(BOOL bUsableToEnemy, BOOL bApplyToAll) {
+  if (bApplyToAll) {
+    g_Battle.UI.iSelectedIndex = (WORD)-1;
+    PAL_BattleCommitAction(FALSE);
+  } else {
+    g_Battle.UI.iSelectedIndex = 0;
+    if (bUsableToEnemy) {
+      if (g_Battle.UI.iPrevEnemyTarget != -1)
+        g_Battle.UI.iSelectedIndex = g_Battle.UI.iPrevEnemyTarget;
+      g_Battle.UI.state = kBattleUISelectTargetEnemy;
+    } else {
+      g_Battle.UI.state = kBattleUISelectTargetPlayer;
+    }
+  }
+}
+
 static VOID PAL_BattleUIMenuMagicSelect(VOID) {
   WORD w = PAL_MagicSelectionMenuUpdate();
   if (w != 0xFFFF) {
@@ -207,23 +223,9 @@ static VOID PAL_BattleUIMenuMagicSelect(VOID) {
     if (w != 0) {
       g_Battle.UI.wActionType = kBattleActionMagic;
       g_Battle.UI.wObjectID = w;
-      if (OBJECT[w].magic.wFlags & kMagicFlagUsableToEnemy) {
-        if (OBJECT[w].magic.wFlags & kMagicFlagApplyToAll) {
-          g_Battle.UI.state = kBattleUISelectTargetEnemyAll;
-        } else {
-          g_Battle.UI.iSelectedIndex = 0;
-          if (g_Battle.UI.iPrevEnemyTarget != -1)
-            g_Battle.UI.iSelectedIndex = g_Battle.UI.iPrevEnemyTarget;
-          g_Battle.UI.state = kBattleUISelectTargetEnemy;
-        }
-      } else {
-        if (OBJECT[w].magic.wFlags & kMagicFlagApplyToAll) {
-          g_Battle.UI.state = kBattleUISelectTargetPlayerAll;
-        } else {
-          g_Battle.UI.iSelectedIndex = 0;
-          g_Battle.UI.state = kBattleUISelectTargetPlayer;
-        }
-      }
+      BOOL isEnemy = (OBJECT[w].magic.wFlags & kMagicFlagUsableToEnemy);
+      BOOL isAll = (OBJECT[w].magic.wFlags & kMagicFlagApplyToAll);
+      PAL_BattleUISetActionTarget(isEnemy, isAll);
     }
   }
 }
@@ -234,12 +236,8 @@ static VOID PAL_BattleUIUseItemSelect(VOID) {
     if (wSelectedItem != 0) {
       g_Battle.UI.wActionType = kBattleActionUseItem;
       g_Battle.UI.wObjectID = wSelectedItem;
-      if (OBJECT[wSelectedItem].item.wFlags & kItemFlagApplyToAll) {
-        g_Battle.UI.state = kBattleUISelectTargetPlayerAll;
-      } else {
-        g_Battle.UI.iSelectedIndex = 0;
-        g_Battle.UI.state = kBattleUISelectTargetPlayer;
-      }
+      BOOL isAll = (OBJECT[wSelectedItem].item.wFlags & kItemFlagApplyToAll);
+      PAL_BattleUISetActionTarget(FALSE, isAll);
     } else {
       g_Battle.UI.MenuState = kBattleMenuMain;
     }
@@ -252,14 +250,8 @@ static VOID PAL_BattleUIThrowItemSelect(VOID) {
     if (wSelectedItem != 0) {
       g_Battle.UI.wActionType = kBattleActionThrowItem;
       g_Battle.UI.wObjectID = wSelectedItem;
-      if (OBJECT[wSelectedItem].item.wFlags & kItemFlagApplyToAll) {
-        g_Battle.UI.state = kBattleUISelectTargetEnemyAll;
-      } else {
-        g_Battle.UI.iSelectedIndex = 0;
-        if (g_Battle.UI.iPrevEnemyTarget != -1)
-          g_Battle.UI.iSelectedIndex = g_Battle.UI.iPrevEnemyTarget;
-        g_Battle.UI.state = kBattleUISelectTargetEnemy;
-      }
+      BOOL isAll = (OBJECT[wSelectedItem].item.wFlags & kItemFlagApplyToAll);
+      PAL_BattleUISetActionTarget(TRUE, isAll);
     } else {
       g_Battle.UI.MenuState = kBattleMenuMain;
     }
@@ -291,17 +283,11 @@ static WORD PAL_BattleUIPickAutoMagic(WORD wPlayerRole, WORD wRandomRange) {
   // Update UI.
   if (wMagic == 0) {
     g_Battle.UI.wActionType = kBattleActionAttack;
-    if (PAL_PlayerCanAttackAll(PARTY_PLAYER(g_Battle.UI.wCurPlayerIndex)))
-      g_Battle.UI.iSelectedIndex = -1;
-    else
-      g_Battle.UI.iSelectedIndex = PAL_BattleSelectAutoTarget();
+    g_Battle.UI.iSelectedIndex = PAL_BattleSelectAutoTarget(0);
   } else {
     g_Battle.UI.wActionType = kBattleActionMagic;
     g_Battle.UI.wObjectID = wMagic;
-    if (OBJECT[wMagic].magic.wFlags & kMagicFlagApplyToAll)
-      g_Battle.UI.iSelectedIndex = -1;
-    else
-      g_Battle.UI.iSelectedIndex = PAL_BattleSelectAutoTarget();
+    g_Battle.UI.iSelectedIndex = PAL_BattleSelectAutoTarget(wMagic);
   }
   return wMagic;
 }
@@ -330,12 +316,7 @@ static BOOL PAL_CheckPlayerStatusAndAuto(WORD wPlayerRole) {
   // 僵尸模式
   if (PLAYER.rgwHP[wPlayerRole] == 0 && gPlayerStatus[wPlayerRole][kStatusPuppet]) {
     g_Battle.UI.wActionType = kBattleActionAttack;
-
-    if (PAL_PlayerCanAttackAll(PARTY_PLAYER(g_Battle.UI.wCurPlayerIndex)))
-      g_Battle.UI.iSelectedIndex = -1;
-    else
-      g_Battle.UI.iSelectedIndex = PAL_BattleSelectAutoTarget();
-
+    g_Battle.UI.iSelectedIndex = PAL_BattleSelectAutoTarget(0);
     PAL_BattleCommitAction(FALSE);
     return TRUE;
   }
@@ -358,12 +339,7 @@ static BOOL PAL_CheckPlayerStatusAndAuto(WORD wPlayerRole) {
   // 自动普通攻击模式
   if (g_Battle.UI.fAutoAttack) {
     g_Battle.UI.wActionType = kBattleActionAttack;
-
-    if (PAL_PlayerCanAttackAll(PARTY_PLAYER(g_Battle.UI.wCurPlayerIndex)))
-      g_Battle.UI.iSelectedIndex = -1;
-    else
-      g_Battle.UI.iSelectedIndex = PAL_BattleSelectAutoTarget();
-
+    g_Battle.UI.iSelectedIndex = PAL_BattleSelectAutoTarget(0);
     PAL_BattleCommitAction(FALSE);
     return TRUE;
   }
@@ -538,14 +514,8 @@ static VOID PAL_BattleUISelectTargetPlayer(int iFrame) {
 static VOID PAL_BattleUIOnSelectAction(int wPlayerRole, WORD selectedAction) {
   if (selectedAction == kBattleUIActionAttack) {
     g_Battle.UI.wActionType = kBattleActionAttack;
-    if (PAL_PlayerCanAttackAll(PARTY_PLAYER(g_Battle.UI.wCurPlayerIndex))) {
-      g_Battle.UI.state = kBattleUISelectTargetEnemyAll;
-    } else {
-      g_Battle.UI.iSelectedIndex = 0;
-      if (g_Battle.UI.iPrevEnemyTarget != -1)
-        g_Battle.UI.iSelectedIndex = g_Battle.UI.iPrevEnemyTarget;
-      g_Battle.UI.state = kBattleUISelectTargetEnemy;
-    }
+    BOOL isAll = PAL_PlayerCanAttackAll(PARTY_PLAYER(g_Battle.UI.wCurPlayerIndex));
+    PAL_BattleUISetActionTarget(TRUE, isAll);
 
   } else if (selectedAction == kBattleUIActionMagic) {
     g_Battle.UI.MenuState = kBattleMenuMagicSelect;
@@ -556,24 +526,9 @@ static VOID PAL_BattleUIOnSelectAction(int wPlayerRole, WORD selectedAction) {
     w = PAL_GetPlayerCooperativeMagic(w);
     g_Battle.UI.wActionType = kBattleActionCoopMagic;
     g_Battle.UI.wObjectID = w;
-
-    if (OBJECT[w].magic.wFlags & kMagicFlagUsableToEnemy) {
-      if (OBJECT[w].magic.wFlags & kMagicFlagApplyToAll) {
-        g_Battle.UI.state = kBattleUISelectTargetEnemyAll;
-      } else {
-        g_Battle.UI.iSelectedIndex = 0;
-        if (g_Battle.UI.iPrevEnemyTarget != -1)
-          g_Battle.UI.iSelectedIndex = g_Battle.UI.iPrevEnemyTarget;
-        g_Battle.UI.state = kBattleUISelectTargetEnemy;
-      }
-    } else {
-      if (OBJECT[w].magic.wFlags & kMagicFlagApplyToAll) {
-        g_Battle.UI.state = kBattleUISelectTargetPlayerAll;
-      } else {
-        g_Battle.UI.iSelectedIndex = 0;
-        g_Battle.UI.state = kBattleUISelectTargetPlayer;
-      }
-    }
+    BOOL isEnemy = (OBJECT[w].magic.wFlags & kMagicFlagUsableToEnemy);
+    BOOL isAll = (OBJECT[w].magic.wFlags & kMagicFlagApplyToAll);
+    PAL_BattleUISetActionTarget(isEnemy, isAll);
 
   } else if (selectedAction == kBattleUIActionMisc) {
     g_Battle.UI.MenuState = kBattleMenuMisc;
@@ -780,20 +735,6 @@ VOID PAL_BattleUIUpdate(VOID) {
   case kBattleUISelectTargetPlayer:
     // 选择队友
     PAL_BattleUISelectTargetPlayer(s_iFrame);
-    break;
-
-  case kBattleUISelectTargetEnemyAll:
-    PAL_BattleUIDrawMenuMain(g_Battle.UI.wSelectedAction);
-    // Don't bother selecting
-    g_Battle.UI.iSelectedIndex = (WORD)-1;
-    PAL_BattleCommitAction(FALSE);
-    break;
-
-  case kBattleUISelectTargetPlayerAll:
-    PAL_BattleUIDrawMenuMain(g_Battle.UI.wSelectedAction);
-    // Don't bother selecting
-    g_Battle.UI.iSelectedIndex = (WORD)-1;
-    PAL_BattleCommitAction(FALSE);
     break;
   }
 

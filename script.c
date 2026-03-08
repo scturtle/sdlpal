@@ -1410,7 +1410,9 @@ WORD PAL_RunTriggerScript(WORD wScriptEntry, WORD wEventObjectID)
 
         PAL_MakeScene();
         VIDEO_UpdateScreen(NULL);
-        UTIL_Delay((pScript->rgwOperand[1] == 0) ? 60 : (pScript->rgwOperand[1] * 60));
+        // if previous script is dialog, do not delay
+        if (SCRIPT[wScriptEntry - 1].wOperation != 0xffff)
+          UTIL_Delay((pScript->rgwOperand[1] == 0) ? 60 : (pScript->rgwOperand[1] * 60));
       }
 
       wScriptEntry++;

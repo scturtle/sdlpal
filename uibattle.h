@@ -30,8 +30,6 @@ typedef enum tagBATTLEUISTATE {
   kBattleUISelectMove,            // 待选择行动
   kBattleUISelectTargetEnemy,     // 待选择敌方目标
   kBattleUISelectTargetPlayer,    // 待选择友方目标
-  kBattleUISelectTargetEnemyAll,  // 针对全体敌方
-  kBattleUISelectTargetPlayerAll, // 针对全体友方
 } BATTLEUISTATE;
 
 typedef enum tagBATTLEMENUSTATE {

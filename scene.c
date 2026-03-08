@@ -778,6 +778,8 @@ VOID PAL_MoveViewport(WORD op0, WORD op1, WORD op2) {
     short speedX = (short)op0;
     short speedY = (short)op1;
     int frames = (short)op2;
+    if (frames == 0)
+      frames = 1;
     uint64_t nextTime = PAL_GetTicks() + FRAME_TIME;
     for (int i = 0; i < frames; i++) {
       // 移动视口
