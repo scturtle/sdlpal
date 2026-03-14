@@ -1128,7 +1128,9 @@ static WORD PAL_InterpretInstruction(WORD wScriptEntry, WORD wEventObjectID)
     break;
 
   case 0x0090:
-    // Set the object script (没什么用?)
+    // Set the object script
+    assert(pScript->rgwOperand[1] == 0 && pScript->rgwOperand[2] == 0);
+    OBJECT[pScript->rgwOperand[0]].enemy.wScriptOnTurnStart = pScript->rgwOperand[1];
     break;
 
   case 0x0091: {
