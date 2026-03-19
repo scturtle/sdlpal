@@ -822,7 +822,12 @@ static WORD PAL_InterpretInstruction(WORD wScriptEntry, WORD wEventObjectID)
     // Walk the NPC in one step
     pCurrent->x += (SHORT)(pScript->rgwOperand[1]);
     pCurrent->y += (SHORT)(pScript->rgwOperand[2]);
-    PAL_NPCWalkOneStep(pScript->rgwOperand[0], 0);
+    WORD objectID;
+    if (pScript->rgwOperand[0] == 0 || pScript->rgwOperand[0] == 0xFFFF)
+      objectID = wEventObjectID;
+    else
+      objectID = pScript->rgwOperand[0];
+    PAL_NPCWalkOneStep(objectID, 0);
     break;
 
   case 0x006D: {
