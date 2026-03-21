@@ -757,10 +757,9 @@ static BOOL PAL_SystemMenu(VOID) {
   switch (wReturnValue) {
   case 1:
     // Save game
-    iSlot = PAL_SaveSlotMenu(g.saveSlot);
+    iSlot = PAL_SaveSlotMenu(gCurrentSaveSlot);
     if (iSlot != MENUITEM_VALUE_CANCELLED) {
       WORD wSavedTimes = 0;
-      g.saveSlot = iSlot;
       for (int i = 1; i <= 5; i++) {
         WORD curSavedTimes = GetSavedTimes(i);
         if (curSavedTimes > wSavedTimes)
@@ -772,7 +771,7 @@ static BOOL PAL_SystemMenu(VOID) {
 
   case 2:
     // Load game
-    iSlot = PAL_SaveSlotMenu(g.saveSlot);
+    iSlot = PAL_SaveSlotMenu(gCurrentSaveSlot);
     if (iSlot != MENUITEM_VALUE_CANCELLED) {
       AUDIO_PlayMusic(0, FALSE, 1);
       PAL_FadeOut(1);

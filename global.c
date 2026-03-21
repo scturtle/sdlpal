@@ -48,6 +48,7 @@ PAL_POS gPartyOffset;     // 主角相对于视口的偏移量
 WORD gCurPalette;         // 当前调色板 ID
 BOOL gNightPalette;       // 是否黑夜
 SHORT gWaveProgression;   // 波浪效果的进度计数
+WORD gCurrentSaveSlot;
 
 FILE *FP_FBP;  // 战斗背景
 FILE *FP_MGO;  // 场景/地图中的动态对象图像 (Map Graphic Object)
@@ -90,9 +91,7 @@ INT PAL_InitGlobals(VOID) {
   return 0;
 }
 
-VOID PAL_FreeGlobals(VOID) {
-  PAL_FreeConfig();
-}
+VOID PAL_FreeGlobals(VOID) { PAL_FreeConfig(); }
 
 static VOID PAL_InitGlobalGameData(VOID) {
   // init global vars
@@ -126,6 +125,8 @@ static VOID PAL_InitGlobalGameData(VOID) {
 }
 
 static INT PAL_LoadGame(int iSaveSlot) {
+  gCurrentSaveSlot = iSaveSlot;
+
   // Try to open the specified file
   FILE *fp = UTIL_OpenFile(PAL_va(1, "%d.rpg", iSaveSlot));
   if (!fp)
@@ -153,6 +154,8 @@ static INT PAL_LoadGame(int iSaveSlot) {
 }
 
 VOID PAL_SaveGame(int iSaveSlot, WORD wSavedTimes) {
+  gCurrentSaveSlot = iSaveSlot;
+
   g.saveSlot = wSavedTimes;
   g._paletteOffset = gNightPalette ? 0x180 : 0;
   g.unused = 2; // Hardcoded in original logic
@@ -169,7 +172,7 @@ VOID PAL_SaveGame(int iSaveSlot, WORD wSavedTimes) {
 
 // Reload the game IN NEXT TICK, avoid reentrant problems.
 VOID PAL_ReloadInNextTick(INT iSaveSlot) {
-  g.saveSlot = (BYTE)iSaveSlot;
+  gCurrentSaveSlot = iSaveSlot; // needed for kLoadGlobalData
   PAL_SetLoadFlags(kLoadGlobalData | kLoadScene | kLoadPlayerSprite);
   gEnteringScene = TRUE;
   gNeedToFadeIn = TRUE;
@@ -178,8 +181,6 @@ VOID PAL_ReloadInNextTick(INT iSaveSlot) {
 
 VOID PAL_InitGameData(INT iSaveSlot) {
   PAL_InitGlobalGameData();
-
-  g.saveSlot = (BYTE)iSaveSlot;
 
   if (iSaveSlot > 0) {
     PAL_LoadGame(iSaveSlot);

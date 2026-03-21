@@ -84,9 +84,8 @@ static SHORT PAL_CalcBaseDamage(WORD wAttackStrength, WORD wDefense) {
 }
 
 // https://github.com/palxex/palresearch/blob/master/EXE/txts/%E9%9A%8F%E8%AE%B0.txt
-static SHORT PAL_CalcMagicDamage(WORD wMagicStrength, WORD wDefense,
-                                 const WORD rgwElementalResistance[NUM_MAGIC_ELEMENTAL], WORD wPoisonResistance,
-                                 WORD wResistanceMultiplier, WORD wMagicObject) {
+SHORT PAL_CalcMagicDamage(WORD wMagicStrength, WORD wDefense, const WORD rgwElementalResistance[NUM_MAGIC_ELEMENTAL],
+                          WORD wPoisonResistance, WORD wResistanceMultiplier, WORD wMagicObject) {
   MAGIC_T *magic = &MAGIC[OBJECT[wMagicObject].magic.wMagicNumber];
 
   // 上浮 10 %

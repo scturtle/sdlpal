@@ -101,6 +101,9 @@ BOOL PAL_EnemyDivisionItself(WORD count, WORD wEventObjectID);
 
 BOOL PAL_EnemySummonMonster(WORD monsterObjectID, WORD count, WORD wEventObjectID);
 
+SHORT PAL_CalcMagicDamage(WORD wMagicStrength, WORD wDefense, const WORD rgwElementalResistance[NUM_MAGIC_ELEMENTAL],
+                          WORD wPoisonResistance, WORD wResistanceMultiplier, WORD wMagicObject);
+
 PAL_C_LINKAGE_END
 
 #endif

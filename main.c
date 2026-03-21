@@ -76,10 +76,10 @@ static VOID PAL_GameMain(VOID) {
   DWORD dwTime;
 
   // Show the opening menu.
-  g.saveSlot = PAL_OpeningMenu();
+  int saveSlot = PAL_OpeningMenu();
 
   // Initialize game data and set the flags to load the game resources.
-  PAL_ReloadInNextTick(g.saveSlot);
+  PAL_ReloadInNextTick(saveSlot);
 
   // Run the main game loop.
   dwTime = PAL_GetTicks();

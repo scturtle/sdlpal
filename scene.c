@@ -76,7 +76,7 @@ VOID PAL_SetLoadFlags(BYTE bFlags) { gpResources.bLoadFlags |= bFlags; }
 VOID PAL_LoadResources(VOID) {
   // Load global data
   if (gpResources.bLoadFlags & kLoadGlobalData) {
-    PAL_InitGameData(g.saveSlot);
+    PAL_InitGameData(gCurrentSaveSlot);
     AUDIO_PlayMusic(g.wCurMusic, TRUE, 1);
   }
 
@@ -691,29 +691,18 @@ VOID PAL_MonsterChasePlayer(WORD wEventObjectID, WORD wSpeed, WORD wChaseRange, 
       x = pEvtObj->x + x / abs(x) * 16;
       y = pEvtObj->y + y / abs(y) * 8;
 
-      if (fFloating) {
+      bool stuck = PAL_CheckObstacle(PAL_XY(pEvtObj->x, pEvtObj->y), FALSE, wEventObjectID);
+      if (fFloating || stuck) {
         wMonsterSpeed = wSpeed;
       } else {
-        wMonsterSpeed = wSpeed;
-        // 碰撞盒检测, 上下左右4个偏移点
-        for (int i = 0; i < 4; i++) {
-          int dx = 0, dy = 0;
-          if (i == 0)
-            dx = -4, dy = +2;
-          else if (i == 1)
-            dx = -4, dy = -2;
-          else if (i == 2)
-            dx = +4, dy = -2;
-          else if (i == 3)
-            dx = +4, dy = +2;
-
-          // 边缘碰到障碍，强制回弹
-          if (PAL_CheckObstacle(PAL_XY(x + dx, y + dy), FALSE, 0)) {
-            pEvtObj->x = prevx;
-            pEvtObj->y = prevy;
-            wMonsterSpeed = 0;
-            break;
-          }
+        // test if the next target position is blocked by walls or other events
+        if (PAL_CheckObstacle(PAL_XY(x, y), TRUE, wEventObjectID)) {
+          // if blocked, snap to grid and stop moving
+          pEvtObj->x = prevx;
+          pEvtObj->y = prevy;
+          wMonsterSpeed = 0;
+        } else {
+          wMonsterSpeed = wSpeed;
         }
       }
     }

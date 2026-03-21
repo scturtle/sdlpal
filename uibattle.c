@@ -262,7 +262,12 @@ static VOID PAL_BattleUIUseItemSelect(BOOL bThrow) {
 // Pick a magic with max power for the specified player for automatic usage.
 static WORD PAL_BattleUIPickAutoMagic(WORD wPlayerRole, WORD wRandomRange) {
   WORD wMagic = 0;
+#define BETTER_AUTO_MAGIC
+#ifndef BETTER_AUTO_MAGIC
   int iMaxPower = 0;
+#endif
+  int maxDamage = 0;
+  int seletedIndex = 0;
   for (int i = 0; i < MAX_PLAYER_MAGICS; i++) {
     if (gPlayerStatus[wPlayerRole][kStatusSilence] != 0) // 咒封
       continue;
@@ -275,11 +280,38 @@ static WORD PAL_BattleUIPickAutoMagic(WORD wPlayerRole, WORD wRandomRange) {
         MAGIC[wMagicNum].wBaseDamage <= 0) {
       continue;
     }
+#ifndef BETTER_AUTO_MAGIC
     int iPower = MAGIC[wMagicNum].wBaseDamage + RandomLong(0, wRandomRange);
     if (iPower > iMaxPower) {
       iMaxPower = iPower;
       wMagic = w;
     }
+#else
+    int currDamage = 0;
+    int currIndex = -1;
+    for (int i = 0; i <= g_Battle.wMaxEnemyIndex; i++) {
+      BATTLEENEMY *enemy = &BATTLE_ENEMY[i];
+      if (enemy->wObjectID == 0)
+        continue;
+      WORD str = PAL_GetPlayerMagicStrength(wPlayerRole);
+      WORD def = enemy->e.wDefense + (enemy->e.wLevel + 6) * 4;
+      SHORT damage = PAL_CalcMagicDamage(str, def, enemy->e.wElemResistance, enemy->e.wPoisonResistance, 1, w);
+      damage = min(max(0, damage), enemy->e.wHealth);
+      if (OBJECT[w].magic.wFlags & kMagicFlagApplyToAll) {
+        currDamage += damage;
+      } else {
+        if (damage > currDamage) {
+          currDamage = damage;
+          currIndex = i;
+        }
+      }
+    }
+    if (currDamage > maxDamage) {
+      maxDamage = currDamage;
+      seletedIndex = currIndex;
+      wMagic = w;
+    }
+#endif
   }
   // Update UI.
   if (wMagic == 0) {
@@ -288,7 +320,11 @@ static WORD PAL_BattleUIPickAutoMagic(WORD wPlayerRole, WORD wRandomRange) {
   } else {
     g_Battle.UI.wActionType = kBattleActionMagic;
     g_Battle.UI.wObjectID = wMagic;
+#ifndef BETTER_AUTO_MAGIC
     g_Battle.UI.iSelectedIndex = PAL_BattleSelectAutoTarget(wMagic);
+#else
+    g_Battle.UI.iSelectedIndex = seletedIndex;
+#endif
   }
   return wMagic;
 }

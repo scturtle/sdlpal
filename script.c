@@ -627,7 +627,7 @@ static WORD PAL_InterpretInstruction(WORD wScriptEntry, WORD wEventObjectID)
   case 0x004E:
     // Load the last saved game
     PAL_FadeOut(1);
-    PAL_ReloadInNextTick(g.saveSlot);
+    PAL_ReloadInNextTick(gCurrentSaveSlot);
     return 0; // don't go further
 
   case 0x004F:
@@ -1417,8 +1417,8 @@ WORD PAL_RunTriggerScript(WORD wScriptEntry, WORD wEventObjectID)
 
         PAL_MakeScene();
         VIDEO_UpdateScreen(NULL);
-        // if previous script is dialog, do not delay
-        if (SCRIPT[wScriptEntry - 1].wOperation != 0xffff)
+        // if previous script is dialog, or adjust pose, do not delay
+        if (SCRIPT[wScriptEntry - 1].wOperation != 0xffff && SCRIPT[wScriptEntry - 1].wOperation != 0x0016)
           UTIL_Delay((pScript->rgwOperand[1] == 0) ? 60 : (pScript->rgwOperand[1] * 60));
       }
 

@@ -452,6 +452,7 @@ extern PAL_POS gPartyOffset;
 extern WORD gCurPalette;
 extern BOOL gNightPalette;
 extern SHORT gWaveProgression;
+extern WORD gCurrentSaveSlot;
 
 extern FILE *FP_FBP;
 extern FILE *FP_MGO;
