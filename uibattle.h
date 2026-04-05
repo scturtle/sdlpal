@@ -26,26 +26,22 @@
 #include "ui.h"
 
 typedef enum tagBATTLEUISTATE {
-  kBattleUIWait,                  // UI等待状态（无交互）
-  kBattleUISelectMove,            // 待选择行动
-  kBattleUISelectTargetEnemy,     // 待选择敌方目标
-  kBattleUISelectTargetPlayer,    // 待选择友方目标
+  kBattleUIWait,               // 待寻找可行动角色
+  kBattleMenuMain,             // 战斗主菜单
+  kBattleMenuMagicSelect,      // 仙术选择子菜单
+  kBattleMenuUseItemSelect,    // 物品使用子菜单
+  kBattleMenuThrowItemSelect,  // 物品投掷子菜单
+  kBattleMenuMisc,             // 杂项菜单 (合击/防御/逃跑/状态)
+  kBattleMenuMiscItemSubMenu,  // 杂项中的物品子菜单
+  kBattleUISelectTargetEnemy,  // 待选择敌方目标
+  kBattleUISelectTargetPlayer, // 待选择友方目标
 } BATTLEUISTATE;
 
-typedef enum tagBATTLEMENUSTATE {
-  kBattleMenuMain,            // 战斗主菜单
-  kBattleMenuMagicSelect,     // 仙术选择子菜单
-  kBattleMenuUseItemSelect,   // 物品使用子菜单
-  kBattleMenuThrowItemSelect, // 物品投掷子菜单
-  kBattleMenuMisc,            // 杂项菜单 (合击/防御/逃跑/状态)
-  kBattleMenuMiscItemSubMenu, // 杂项中的物品子菜单
-} BATTLEMENUSTATE;
-
 typedef enum tagBATTLEUIACTION {
-  kBattleUIActionAttack,    // 界面动作：普攻
-  kBattleUIActionMagic,     // 界面动作：仙术
-  kBattleUIActionCoopMagic, // 界面动作：合击技
-  kBattleUIActionMisc,      // 界面动作：其他 (物品/防御/逃跑)
+  kBattleUIActionAttack,    // 普攻
+  kBattleUIActionMagic,     // 仙术
+  kBattleUIActionCoopMagic, // 合击技
+  kBattleUIActionMisc,      // 其他 (物品/防御/逃跑)
 } BATTLEUIACTION;
 
 typedef struct tagSHOWNUM {
@@ -58,8 +54,7 @@ typedef struct tagSHOWNUM {
 #define BATTLEUI_MAX_SHOWNUM 16
 
 typedef struct tagBATTLEUI {
-  BATTLEUISTATE state;       // 当前UI状态（选择动作/选择目标等）
-  BATTLEMENUSTATE MenuState; // 当前菜单层级状态
+  BATTLEUISTATE state;  // 当前UI状态（选择动作/选择目标等）
 
   WORD wCurPlayerIndex; // 当前正在操作的玩家角色索引
   WORD wSelectedAction; // 当前菜单中选中的选项索引
@@ -69,7 +64,7 @@ typedef struct tagBATTLEUI {
   WORD wActionType; // 最终决定执行的动作类型
   WORD wObjectID;   // 要使用的物品或仙术的对象ID
 
-  BOOL fAutoAttack; // 自动攻击模式
+  BOOL fAutoAttack; // 围攻
 
   SHOWNUM rgShowNum[BATTLEUI_MAX_SHOWNUM]; // 飘出的数值对象数组（伤害/治疗数字）
 } BATTLEUI;
@@ -78,11 +73,11 @@ PAL_C_LINKAGE_BEGIN
 
 VOID PAL_PlayerInfoBox(PAL_POS pos, int iPartyIndex, BOOL fUpdate);
 
-VOID PAL_BattleUIPlayerReady(WORD wPlayerIndex);
-
 VOID PAL_BattleUIUpdate(VOID);
 
 VOID PAL_BattleUIShowNum(WORD wNum, PAL_POS pos, NUMCOLOR color);
+
+VOID PAL_BattleUIDrawNumbers(VOID);
 
 PAL_C_LINKAGE_END
 

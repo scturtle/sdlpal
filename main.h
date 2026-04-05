@@ -24,9 +24,11 @@
 
 #include "audio.h"
 #include "aviplay.h"
-#include "battle.h"
+#include "battle_core.h"
+#include "battle_anim.h"
+#include "battle_action.h"
+#include "battle_render.h"
 #include "common.h"
-#include "fight.h"
 #include "global.h"
 #include "input.h"
 #include "menu.h"

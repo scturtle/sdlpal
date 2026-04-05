@@ -19,9 +19,10 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-#ifndef BATTLE_H
-#define BATTLE_H
+#ifndef BATTLE_CORE_H
+#define BATTLE_CORE_H
 
+#include "common.h"
 #include "global.h"
 #include "uibattle.h"
 
@@ -32,15 +33,13 @@ typedef enum tagBATTLERESULT {
   kBattleResultWon = 3,          // 玩家赢得战斗
   kBattleResultLost = 1,         // 玩家输掉战斗
   kBattleResultFleed = 0xFFFF,   // 玩家从战斗中逃跑
-  kBattleResultTerminated = 0,   // 战斗因脚本执行而终止（如剧情强制结束）
+  kBattleResultTerminated = 0,   // 敌方从战斗中逃跑
   kBattleResultOnGoing = 1000,   // 战斗正在进行中
-  kBattleResultPreBattle = 1001, // 正在运行战前脚本
-  kBattleResultPause = 1002,     // 战斗暂停, 运行玩家愤怒脚本
+  kBattleResultPause = 1001,     // 战斗暂停, 运行玩家愤怒脚本
 } BATTLERESULT;
 
 typedef enum tagFIGHTERSTATE {
-  kFighterWait, // 等待状态
-  kFighterCom,  // 指令状态, 行动条已满, 等待玩家选择
+  kFighterWait, // 等待选择动作指令
   kFighterAct,  // 已确定动作指令
 } FIGHTERSTATE;
 
@@ -81,6 +80,7 @@ typedef struct tagBATTLEENEMY {
 
 // 只在这里放置一些战斗专用的数据, 其他数据可以在全局数据中访问
 typedef struct tagBATTLEPLAYER {
+  FIGHTERSTATE state;  // 战斗状态（等待/行动中等）
   BATTLEACTION action;     // 要执行的动作
   BATTLEACTION prevAction; // 上一回合的动作（用于“重复”功能）
 
@@ -88,9 +88,7 @@ typedef struct tagBATTLEPLAYER {
   PAL_POS pos;         // 屏幕上的当前坐标
   PAL_POS posOriginal; // 屏幕上的原始坐标
   WORD wCurrentFrame;  // 当前动画帧号
-  FIGHTERSTATE state;  // 战斗状态（等待/行动中等）
   BOOL fDefending;     // 处于防御状态
-  BOOL fSecondAttack;  // 双次攻击状态
   WORD wPrevHP;        // 行动前的 HP
   WORD wPrevMP;        // 行动前的 MP
   INT iColorShift;     // 颜色偏移值
@@ -158,8 +156,8 @@ typedef struct tagBATTLE {
   BATTLEPLAYER rgPlayer[MAX_PLAYERS_IN_PARTY];    // 玩家角色数组
   BATTLEENEMY rgEnemy[MAX_ENEMIES_IN_TEAM];       // 敌人角色数组
   WORD wMaxEnemyIndex;                            // 敌人的最大索引值
-  ACTIONQUEUE ActionQueue[MAX_ACTIONQUEUE_ITEMS]; // 动作队列（决定出手顺序）
-  int iCurAction;                                 // 当前正在执行的动作索引
+  ACTIONQUEUE ActionQueue[MAX_ACTIONQUEUE_ITEMS]; // 玩家和敌人的行动序列
+  int iCurAction;                                 // 当前正在执行的序列中的行动的索引
   BATTLEPHASE Phase;                              // 当前战斗阶段
   BATTLERESULT BattleResult;                      // 战斗结果状态
   INT iExpGained;                                 // 获得的经验总值
@@ -169,55 +167,81 @@ typedef struct tagBATTLE {
   BOOL fEnemyCleared;                             // 敌人是否已被清除
   BOOL fEnemyMoving;                              // 敌人正在行动中
   WORD wMovingPlayerIndex;                        // 当前正在行动的玩家
+
   BOOL fRepeat;                                   // 玩家按下了重复
   BOOL fForce;                                    // 玩家按下了自动战斗
   BOOL fFlee;                                     // 玩家按下了逃跑
-  BOOL fPrevAutoAtk;                              // 上一回合是否使用了自动攻击
-  BOOL fPrevPlayerAutoAtk;                        // 上一个玩家在同一回合是否使用了自动攻击
-
-  WORD coopContributors[MAX_PLAYERS_IN_PARTY]; // 合击技贡献者列表
-  BOOL fThisTurnCoop;                          // 本回合是否触发了合击
+  BOOL fPrevAutoAtk;                              // 上一回合是否使用了围攻
+  BOOL fPrevPlayerAutoAtk;                        // 是否在同一回合有行动顺序在前的玩家选择了围攻
 
 } BATTLE;
+
+extern BATTLE g_Battle;
+extern WORD g_rgPlayerPos[3][3][2];
 
 #define BATTLE_PLAYER g_Battle.rgPlayer
 #define BATTLE_ENEMY g_Battle.rgEnemy
 
 PAL_C_LINKAGE_BEGIN
 
-extern BATTLE g_Battle;
+// ============ Player State Checks ============
 
-VOID PAL_LoadBattleSprites(VOID);
+// Check if a player character is in dying status (HP < 20% or < 100)
+BOOL PAL_IsPlayerDying(WORD wPlayerRole);
 
-VOID PAL_BattleDrawBackground(VOID);
+// Check if a player character is healthy (no bad status effects)
+BOOL PAL_IsPlayerHealthy(WORD wPlayerRole);
 
-VOID PAL_BattleDrawEnemySprites(WORD wEnemyIndex, SDL_Surface *lpDstSurface);
+BOOL PAL_CanPlayerAct(WORD wPlayerRole, BOOL fConsiderConfused);
 
-VOID PAL_BattleDrawPlayerSprites(WORD wPlayerIndex, SDL_Surface *lpDstSurface);
+BOOL PAL_isPlayerBadStatus(WORD wPlayerRole);
 
-VOID PAL_BattleDrawMagicSprites(INT iMagicNum, SDL_Surface *lpDstSurface, PAL_POS pos);
+// ============ Damage Calculations ============
 
-VOID PAL_BattleClearSpriteObject(VOID);
+SHORT PAL_CalcBaseDamage(WORD wAttackStrength, WORD wDefense);
 
-VOID PAL_BattleSpriteAddUnlock(VOID);
+// Calculate magic damage including elemental resistance
+SHORT PAL_CalcMagicDamage(WORD wMagicStrength, WORD wDefense, const WORD rgwElementalResistance[NUM_MAGIC_ELEMENTAL],
+                          WORD wPoisonResistance, WORD wResistanceMultiplier, WORD wMagicObject);
 
-VOID PAL_BattleAddSpriteObject(WORD wType, WORD wObjectIndex, PAL_POS pos, SHORT sLayerOffset, BOOL fHaveColorShift);
+// Calculate physical attack damage with resistance
+SHORT PAL_CalcPhysicalAttackDamage(WORD wAttackStrength, WORD wDefense, WORD wAttackResistance);
 
-VOID PAL_BattleAddFighterSpriteObject(VOID);
+// ============ Stat Backup and Display ============
 
-VOID PAL_BattleSortSpriteObjecByPos(VOID);
+// Backup HP and MP values of all players and enemies
+VOID PAL_BattleBackupStat(VOID);
 
-VOID PAL_BattleDrawAllSprites(VOID);
+// Display stat changes, return TRUE if any displayed
+BOOL PAL_BattleDisplayStatChange(VOID);
 
-VOID PAL_BattleDrawAllSpritesWithColorShift(BOOL fColorShift);
+// ============ Helper functions ============
 
-VOID PAL_BattleMakeScene(VOID);
+VOID PAL_BattleRenderStart();
 
-VOID PAL_BattleFadeScene(VOID);
+VOID PAL_BattleRenderEnd();
 
-VOID PAL_BattleEnemyEscape(VOID);
+// Get battle frame delay function (for visual timing)
+VOID PAL_BattleDelay(WORD wDuration, WORD wObjectID, BOOL fUpdateGesture);
 
-VOID PAL_BattlePlayerEscape(VOID);
+INT PAL_BattleSelectAutoTargetFrom(INT begin);
+
+// Auto-select enemy target for attacks/magic
+INT PAL_BattleSelectAutoTarget(WORD wMagic);
+
+// ============ Call from script ============
+
+// Allow enemy to divide itself (split into multiple enemies)
+BOOL PAL_EnemyDivisionItself(WORD count, WORD wEventObjectID);
+
+// Allow enemy to summon another monster
+BOOL PAL_EnemySummonMonster(WORD monsterObjectID, WORD count, WORD wEventObjectID);
+
+// Simulate a magic effect (used by item throwing)
+VOID PAL_BattleSimulateMagic(SHORT sTarget, WORD wMagicObjectID, WORD wBaseDamage);
+
+// Attempt to steal from enemy
+VOID PAL_BattleStealFromEnemy(WORD wTarget, WORD wStealRate);
 
 BATTLERESULT
 PAL_StartBattle(WORD wEnemyTeam, BOOL fIsBoss);

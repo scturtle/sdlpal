@@ -197,22 +197,15 @@ static VOID PAL_BattleUIHandleMiscItemSubMenu(VOID) {
   WORD w = PAL_BattleUIMiscItemSubMenuUpdate();
   if (w == 0xFFFF)
     return;
-  g_Battle.UI.MenuState = kBattleMenuMain;
+  g_Battle.UI.state = kBattleMenuMain;
   if (w == 1) {
-    g_Battle.UI.MenuState = kBattleMenuUseItemSelect;
+    g_Battle.UI.state = kBattleMenuUseItemSelect;
     PAL_ItemSelectMenuInit(kItemFlagUsable);
   }
   if (w == 2) {
-    g_Battle.UI.MenuState = kBattleMenuThrowItemSelect;
+    g_Battle.UI.state = kBattleMenuThrowItemSelect;
     PAL_ItemSelectMenuInit(kItemFlagThrowable);
   }
-}
-
-VOID PAL_BattleUIPlayerReady(WORD wPlayerIndex) {
-  g_Battle.UI.wCurPlayerIndex = wPlayerIndex;
-  g_Battle.UI.state = kBattleUISelectMove;
-  g_Battle.UI.wSelectedAction = 0;
-  g_Battle.UI.MenuState = kBattleMenuMain;
 }
 
 static VOID PAL_BattleUISetActionTarget(BOOL bUsableToEnemy, BOOL bApplyToAll) {
@@ -234,7 +227,7 @@ static VOID PAL_BattleUISetActionTarget(BOOL bUsableToEnemy, BOOL bApplyToAll) {
 static VOID PAL_BattleUIMenuMagicSelect(VOID) {
   WORD w = PAL_MagicSelectionMenuUpdate();
   if (w != 0xFFFF) {
-    g_Battle.UI.MenuState = kBattleMenuMain;
+    g_Battle.UI.state = kBattleMenuMain;
     if (w != 0) {
       g_Battle.UI.wActionType = kBattleActionMagic;
       g_Battle.UI.wObjectID = w;
@@ -254,7 +247,7 @@ static VOID PAL_BattleUIUseItemSelect(BOOL bThrow) {
       BOOL isAll = (OBJECT[wSelectedItem].item.wFlags & kItemFlagApplyToAll);
       PAL_BattleUISetActionTarget(bThrow, isAll);
     } else {
-      g_Battle.UI.MenuState = kBattleMenuMain;
+      g_Battle.UI.state = kBattleMenuMain;
     }
   }
 }
@@ -329,10 +322,10 @@ static WORD PAL_BattleUIPickAutoMagic(WORD wPlayerRole, WORD wRandomRange) {
   return wMagic;
 }
 
-static VOID PAL_BattleUIDrawNumbers(VOID) {
+VOID PAL_BattleUIDrawNumbers(VOID) {
   for (int i = 0; i < BATTLEUI_MAX_SHOWNUM; i++) {
     if (g_Battle.UI.rgShowNum[i].wNum > 0) {
-      uint64_t pastFrames = ++g_Battle.UI.rgShowNum[i].pastFrames;
+      int pastFrames = ++g_Battle.UI.rgShowNum[i].pastFrames;
       if (pastFrames > 10) {
         g_Battle.UI.rgShowNum[i].wNum = 0;
       } else {
@@ -341,46 +334,6 @@ static VOID PAL_BattleUIDrawNumbers(VOID) {
       }
     }
   }
-}
-
-static VOID PAL_BattleEndFrame(VOID) {
-  PAL_BattleUIDrawNumbers();
-  PAL_ClearKeyState();
-}
-
-// 检查玩家是否因状态异常(昏睡、疯魔等)或自动攻击而跳过指令输入
-static BOOL PAL_CheckPlayerStatusAndAuto(WORD wPlayerRole) {
-  // 僵尸模式
-  if (PLAYER.rgwHP[wPlayerRole] == 0 && gPlayerStatus[wPlayerRole][kStatusPuppet]) {
-    g_Battle.UI.wActionType = kBattleActionAttack;
-    g_Battle.UI.iSelectedIndex = PAL_BattleSelectAutoTarget(0);
-    PAL_BattleCommitAction(FALSE);
-    return TRUE;
-  }
-
-  // 无法行动 (死亡、昏睡、定身)
-  if (PLAYER.rgwHP[wPlayerRole] == 0 || gPlayerStatus[wPlayerRole][kStatusSleep] != 0 ||
-      gPlayerStatus[wPlayerRole][kStatusParalyzed] != 0) {
-    g_Battle.UI.wActionType = kBattleActionPass;
-    PAL_BattleCommitAction(FALSE);
-    return TRUE;
-  }
-
-  // 疯魔
-  if (gPlayerStatus[wPlayerRole][kStatusConfused] != 0) {
-    g_Battle.UI.wActionType = kBattleActionAttackMate;
-    PAL_BattleCommitAction(FALSE);
-    return TRUE;
-  }
-
-  // 自动普通攻击模式
-  if (g_Battle.UI.fAutoAttack) {
-    g_Battle.UI.wActionType = kBattleActionAttack;
-    g_Battle.UI.iSelectedIndex = PAL_BattleSelectAutoTarget(0);
-    PAL_BattleCommitAction(FALSE);
-    return TRUE;
-  }
-  return FALSE;
 }
 
 // 撤销/返回时物品归还逻辑
@@ -445,13 +398,13 @@ static VOID PAL_BattleUISelectTargetEnemy(int iFrame) {
   }
 
   if (lastAliveIndex == -1) {
-    g_Battle.UI.state = kBattleUISelectMove;
+    g_Battle.UI.state = kBattleMenuMain;
     return;
   }
 
   if (g_Battle.UI.wActionType == kBattleActionCoopMagic) {
     if (!PAL_BattleUIIsActionValid(kBattleUIActionCoopMagic)) {
-      g_Battle.UI.state = kBattleUISelectMove;
+      g_Battle.UI.state = kBattleMenuMain;
       return;
     }
   }
@@ -486,7 +439,7 @@ static VOID PAL_BattleUISelectTargetEnemy(int iFrame) {
   }
 
   if (g_InputState.dwKeyPress & kKeyMenu) { // ESC
-    g_Battle.UI.state = kBattleUISelectMove;
+    g_Battle.UI.state = kBattleMenuMain;
   } else if (g_InputState.dwKeyPress & kKeySearch) { // SPACE or ENTER
     PAL_BattleCommitAction(FALSE);
   } else if (g_InputState.dwKeyPress & (kKeyLeft | kKeyDown)) {
@@ -528,7 +481,7 @@ static VOID PAL_BattleUISelectTargetPlayer(int iFrame) {
   PAL_RLEBlitToSurface(PAL_GetUISprite(j), gpScreen, PAL_XY(x, y));
 
   if (g_InputState.dwKeyPress & kKeyMenu) { // ESC
-    g_Battle.UI.state = kBattleUISelectMove;
+    g_Battle.UI.state = kBattleMenuMain;
   } else if (g_InputState.dwKeyPress & kKeySearch) { // SPACE or RETURN
     PAL_BattleCommitAction(FALSE);
   } else if (g_InputState.dwKeyPress & (kKeyLeft | kKeyDown)) {
@@ -551,7 +504,7 @@ static VOID PAL_BattleUIOnSelectAction(int wPlayerRole, WORD selectedAction) {
     PAL_BattleUISetActionTarget(TRUE, isAll);
 
   } else if (selectedAction == kBattleUIActionMagic) {
-    g_Battle.UI.MenuState = kBattleMenuMagicSelect;
+    g_Battle.UI.state = kBattleMenuMagicSelect;
     PAL_MagicSelectionMenuInit(wPlayerRole, TRUE, 0);
 
   } else if (selectedAction == kBattleUIActionCoopMagic) {
@@ -563,7 +516,7 @@ static VOID PAL_BattleUIOnSelectAction(int wPlayerRole, WORD selectedAction) {
     PAL_BattleUISetActionTarget(isEnemy, isAll);
 
   } else if (selectedAction == kBattleUIActionMisc) {
-    g_Battle.UI.MenuState = kBattleMenuMisc;
+    g_Battle.UI.state = kBattleMenuMisc;
   }
 }
 
@@ -583,13 +536,13 @@ static VOID PAL_BattleUIHandleMiscMenu(VOID) {
     return;
   }
 
-  g_Battle.UI.MenuState = kBattleMenuMain;
+  g_Battle.UI.state = kBattleMenuMain;
   switch (w) {
   case 1: // auto
     g_Battle.UI.fAutoAttack = TRUE;
     break;
   case 2: // item
-    g_Battle.UI.MenuState = kBattleMenuMiscItemSubMenu;
+    g_Battle.UI.state = kBattleMenuMiscItemSubMenu;
     break;
   case 3: // defend
     g_Battle.UI.wActionType = kBattleActionDefend;
@@ -605,17 +558,15 @@ static VOID PAL_BattleUIHandleMiscMenu(VOID) {
   }
 }
 
-static VOID PAL_BattleUIHandleSelectMove(WORD wPlayerRole) {
-  if (g_Battle.UI.MenuState == kBattleMenuMain) {
-    if (g_InputState.dir == kDirNorth) {
-      g_Battle.UI.wSelectedAction = kBattleUIActionAttack;
-    } else if (g_InputState.dir == kDirSouth) {
-      g_Battle.UI.wSelectedAction = kBattleUIActionMisc;
-    } else if (g_InputState.dir == kDirWest) {
-      g_Battle.UI.wSelectedAction = kBattleUIActionMagic;
-    } else if (g_InputState.dir == kDirEast) {
-      g_Battle.UI.wSelectedAction = kBattleUIActionCoopMagic;
-    }
+static VOID PAL_BattleUIHandleMenuMain(WORD wPlayerRole) {
+  if (g_InputState.dir == kDirNorth) {
+    g_Battle.UI.wSelectedAction = kBattleUIActionAttack;
+  } else if (g_InputState.dir == kDirSouth) {
+    g_Battle.UI.wSelectedAction = kBattleUIActionMisc;
+  } else if (g_InputState.dir == kDirWest) {
+    g_Battle.UI.wSelectedAction = kBattleUIActionMagic;
+  } else if (g_InputState.dir == kDirEast) {
+    g_Battle.UI.wSelectedAction = kBattleUIActionCoopMagic;
   }
 
   if (!PAL_BattleUIIsActionValid(g_Battle.UI.wSelectedAction))
@@ -623,54 +574,76 @@ static VOID PAL_BattleUIHandleSelectMove(WORD wPlayerRole) {
 
   PAL_BattleUIDrawMenuMain(g_Battle.UI.wSelectedAction);
 
-  switch (g_Battle.UI.MenuState) {
-  case kBattleMenuMain:
-    if (g_InputState.dwKeyPress & kKeySearch) { // SPACE or RETURN
-      PAL_BattleUIOnSelectAction(wPlayerRole, g_Battle.UI.wSelectedAction);
-    } else if (g_InputState.dwKeyPress & kKeyDefend) { // D
-      g_Battle.UI.wActionType = kBattleActionDefend;
-      PAL_BattleCommitAction(FALSE);
-    } else if (g_InputState.dwKeyPress & kKeyForce) { // F
-      PAL_BattleUIPickAutoMagic(PARTY_PLAYER(g_Battle.UI.wCurPlayerIndex), 60);
-      PAL_BattleCommitAction(FALSE);
-    } else if (g_InputState.dwKeyPress & kKeyFlee) { // Q
-      g_Battle.UI.wActionType = kBattleActionFlee;
-      PAL_BattleCommitAction(FALSE);
-    } else if (g_InputState.dwKeyPress & kKeyUseItem) { // E
-      g_Battle.UI.MenuState = kBattleMenuUseItemSelect;
-      PAL_ItemSelectMenuInit(kItemFlagUsable);
-    } else if (g_InputState.dwKeyPress & kKeyThrowItem) { // W
-      g_Battle.UI.MenuState = kBattleMenuThrowItemSelect;
-      PAL_ItemSelectMenuInit(kItemFlagThrowable);
-    } else if (g_InputState.dwKeyPress & kKeyRepeat) { // R
-      PAL_BattleCommitAction(TRUE);
-    } else if (g_InputState.dwKeyPress & kKeyMenu) { // ESC
-      BATTLE_PLAYER[g_Battle.UI.wCurPlayerIndex].state = kFighterWait;
-      g_Battle.UI.state = kBattleUIWait;
-      PAL_HandleMenuCancel();
-    }
-    break;
-
-  case kBattleMenuMagicSelect:
-    PAL_BattleUIMenuMagicSelect();
-    break;
-
-  case kBattleMenuUseItemSelect:
-    PAL_BattleUIUseItemSelect(FALSE);
-    break;
-
-  case kBattleMenuThrowItemSelect:
-    PAL_BattleUIUseItemSelect(TRUE);
-    break;
-
-  case kBattleMenuMisc:
-    PAL_BattleUIHandleMiscMenu();
-    break;
-
-  case kBattleMenuMiscItemSubMenu:
-    PAL_BattleUIHandleMiscItemSubMenu();
-    break;
+  if (g_InputState.dwKeyPress & kKeySearch) { // SPACE or RETURN
+    PAL_BattleUIOnSelectAction(wPlayerRole, g_Battle.UI.wSelectedAction);
+  } else if (g_InputState.dwKeyPress & kKeyDefend) { // D
+    g_Battle.UI.wActionType = kBattleActionDefend;
+    PAL_BattleCommitAction(FALSE);
+  } else if (g_InputState.dwKeyPress & kKeyForce) { // F
+    PAL_BattleUIPickAutoMagic(PARTY_PLAYER(g_Battle.UI.wCurPlayerIndex), 60);
+    PAL_BattleCommitAction(FALSE);
+  } else if (g_InputState.dwKeyPress & kKeyFlee) { // Q
+    g_Battle.UI.wActionType = kBattleActionFlee;
+    PAL_BattleCommitAction(FALSE);
+  } else if (g_InputState.dwKeyPress & kKeyUseItem) { // E
+    g_Battle.UI.state = kBattleMenuUseItemSelect;
+    PAL_ItemSelectMenuInit(kItemFlagUsable);
+  } else if (g_InputState.dwKeyPress & kKeyThrowItem) { // W
+    g_Battle.UI.state = kBattleMenuThrowItemSelect;
+    PAL_ItemSelectMenuInit(kItemFlagThrowable);
+  } else if (g_InputState.dwKeyPress & kKeyRepeat) { // R
+    PAL_BattleCommitAction(TRUE);
+  } else if (g_InputState.dwKeyPress & kKeyMenu) { // ESC
+    BATTLE_PLAYER[g_Battle.UI.wCurPlayerIndex].state = kFighterWait;
+    g_Battle.UI.state = kBattleUIWait;
+    PAL_HandleMenuCancel();
   }
+}
+
+// 找到下一个需要决策的玩家，并处理不可控状态
+static BOOL PAL_BattleAdvanceToNextPlayer(VOID) {
+  for (int i = 0; i <= g.wMaxPartyMemberIndex; i++) {
+    if (BATTLE_PLAYER[i].state != kFighterWait)
+      continue;
+
+    WORD wPlayerRole = PARTY_PLAYER(i);
+    g_Battle.UI.wCurPlayerIndex = i;
+
+    // 僵尸模式
+    if (PLAYER.rgwHP[wPlayerRole] == 0 && gPlayerStatus[wPlayerRole][kStatusPuppet]) {
+      g_Battle.UI.wActionType = kBattleActionAttack;
+      g_Battle.UI.iSelectedIndex = PAL_BattleSelectAutoTarget(0);
+      PAL_BattleCommitAction(FALSE);
+      continue;
+    }
+    // 死亡 / 昏睡 / 定身
+    if (PLAYER.rgwHP[wPlayerRole] == 0 || gPlayerStatus[wPlayerRole][kStatusSleep] != 0 ||
+        gPlayerStatus[wPlayerRole][kStatusParalyzed] != 0) {
+      g_Battle.UI.wActionType = kBattleActionPass;
+      PAL_BattleCommitAction(FALSE);
+      continue;
+    }
+    // 疯魔
+    if (gPlayerStatus[wPlayerRole][kStatusConfused] != 0) {
+      g_Battle.UI.wActionType = kBattleActionAttackMate;
+      PAL_BattleCommitAction(FALSE);
+      continue;
+    }
+    // 围攻
+    if (g_Battle.UI.fAutoAttack) {
+      g_Battle.UI.wActionType = kBattleActionAttack;
+      g_Battle.UI.iSelectedIndex = PAL_BattleSelectAutoTarget(0);
+      PAL_BattleCommitAction(FALSE);
+      continue;
+    }
+
+    // 找到了可控玩家
+    g_Battle.UI.wCurPlayerIndex = i;
+    g_Battle.UI.wSelectedAction = 0;
+    g_Battle.UI.state = kBattleMenuMain;
+    return TRUE;
+  }
+  return FALSE;
 }
 
 VOID PAL_BattleUIUpdate(VOID) {
@@ -679,35 +652,11 @@ VOID PAL_BattleUIUpdate(VOID) {
 
   // 自动战斗 (非围攻)
   if (gAutoBattle) {
-    PAL_BattlePlayerCheckReady();
+    PAL_BattleAdvanceToNextPlayer();
     if (g_Battle.UI.state != kBattleUIWait) {
       PAL_BattleUIPickAutoMagic(PARTY_PLAYER(g_Battle.UI.wCurPlayerIndex), 9999);
       PAL_BattleCommitAction(FALSE);
     }
-    PAL_BattleEndFrame();
-    return;
-  }
-
-  if (g_Battle.UI.fAutoAttack) {
-    // 取消围攻
-    if (g_InputState.dwKeyPress & kKeyMenu) {
-      g_Battle.UI.fAutoAttack = FALSE;
-    } else {
-      // 显示围攻
-      LPCWSTR itemText = PAL_GetWord(BATTLEUI_LABEL_AUTO);
-      PAL_DrawText(itemText, PAL_XY(320 - 8 - PAL_TextWidth(itemText), 10), MENUITEM_COLOR_CONFIRMED, TRUE, FALSE);
-    }
-  }
-
-  // 动画中也可以切换围攻
-  if (g_InputState.dwKeyPress & kKeyAuto) {
-    g_Battle.UI.fAutoAttack = !g_Battle.UI.fAutoAttack;
-    g_Battle.UI.MenuState = kBattleMenuMain;
-  }
-
-  // 动画播放中跳过 UI 逻辑
-  if (g_Battle.Phase == kBattlePhasePerformAction) {
-    PAL_BattleEndFrame();
     return;
   }
 
@@ -717,52 +666,62 @@ VOID PAL_BattleUIUpdate(VOID) {
       PAL_PlayerInfoBox(PAL_XY(91 + 77 * i, 165), i, FALSE);
   }
 
-  if (g_InputState.dwKeyPress & kKeyStatus) {
-    PAL_PlayerStatus();
-    PAL_BattleEndFrame();
-    return;
+  if (g_Battle.UI.state == kBattleUIWait) {
+    PAL_BattleAdvanceToNextPlayer();
+    if (g_Battle.UI.state == kBattleUIWait)
+      return;
   }
 
   WORD wPlayerRole = PARTY_PLAYER(g_Battle.UI.wCurPlayerIndex);
 
-  // 选择行动或目标中
-  if (g_Battle.UI.state != kBattleUIWait) {
-    // 玩家行动前置检查 (如果玩家不能控制，直接提交动作并返回)
-    if (PAL_CheckPlayerStatusAndAuto(wPlayerRole)) {
-      PAL_BattleEndFrame();
-      return;
-    }
-    // 当前玩家头顶箭头
-    int i = s_iFrame & 1 ? SPRITENUM_BATTLE_ARROW_CURRENTPLAYER : SPRITENUM_BATTLE_ARROW_CURRENTPLAYER_RED;
-    int x = g_rgPlayerPos[g.wMaxPartyMemberIndex][g_Battle.UI.wCurPlayerIndex][0] - 8;
-    int y = g_rgPlayerPos[g.wMaxPartyMemberIndex][g_Battle.UI.wCurPlayerIndex][1] - 74;
-    PAL_RLEBlitToSurface(PAL_GetUISprite(i), gpScreen, PAL_XY(x, y));
-  }
+  // 绘制当前正在选择行动的角色头顶箭头
+  int i = s_iFrame & 1 ? SPRITENUM_BATTLE_ARROW_CURRENTPLAYER : SPRITENUM_BATTLE_ARROW_CURRENTPLAYER_RED;
+  int x = g_rgPlayerPos[g.wMaxPartyMemberIndex][g_Battle.UI.wCurPlayerIndex][0] - 8;
+  int y = g_rgPlayerPos[g.wMaxPartyMemberIndex][g_Battle.UI.wCurPlayerIndex][1] - 74;
+  PAL_RLEBlitToSurface(PAL_GetUISprite(i), gpScreen, PAL_XY(x, y));
 
   // 主 UI 状态机
   switch (g_Battle.UI.state) {
   case kBattleUIWait:
-    if (!g_Battle.fEnemyCleared)
-      PAL_BattlePlayerCheckReady();
     break;
 
-  case kBattleUISelectMove:
-    // 动作菜单
-    PAL_BattleUIHandleSelectMove(wPlayerRole);
+  case kBattleMenuMain:
+    PAL_BattleUIHandleMenuMain(wPlayerRole);
+    break;
+
+  case kBattleMenuMagicSelect:
+    PAL_BattleUIDrawMenuMain(g_Battle.UI.wSelectedAction);
+    PAL_BattleUIMenuMagicSelect();
+    break;
+
+  case kBattleMenuUseItemSelect:
+    PAL_BattleUIDrawMenuMain(g_Battle.UI.wSelectedAction);
+    PAL_BattleUIUseItemSelect(FALSE);
+    break;
+
+  case kBattleMenuThrowItemSelect:
+    PAL_BattleUIDrawMenuMain(g_Battle.UI.wSelectedAction);
+    PAL_BattleUIUseItemSelect(TRUE);
+    break;
+
+  case kBattleMenuMisc:
+    PAL_BattleUIDrawMenuMain(g_Battle.UI.wSelectedAction);
+    PAL_BattleUIHandleMiscMenu();
+    break;
+
+  case kBattleMenuMiscItemSubMenu:
+    PAL_BattleUIDrawMenuMain(g_Battle.UI.wSelectedAction);
+    PAL_BattleUIHandleMiscItemSubMenu();
     break;
 
   case kBattleUISelectTargetEnemy:
-    // 选择敌人
     PAL_BattleUISelectTargetEnemy(s_iFrame);
     break;
 
   case kBattleUISelectTargetPlayer:
-    // 选择队友
     PAL_BattleUISelectTargetPlayer(s_iFrame);
     break;
   }
-
-  PAL_BattleEndFrame();
 }
 
 // Show a number on battle screen (indicates HP/MP change).
