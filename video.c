@@ -19,23 +19,110 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-#include "main.h"
-#include <float.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
 
-SDL_Window *gpWindow = NULL;
-SDL_Renderer *gpRenderer = NULL;
-SDL_Texture *gpTexture = NULL;
+#include "main.h"
+
+#define WIDTH 320
+#define HEIGHT 200
+
+/* ════════════════════════════════════════════════════════════════════════
+ * 全局变量 & SDL Surface 状态 (移除了 Window, Renderer 和 Texture)
+ * ════════════════════════════════════════════════════════════════════════ */
 SDL_Surface *gpScreen = NULL;     // 8-bit 原始游戏画布 (320x200)
 SDL_Surface *gpScreenBak = NULL;  // 备份画布
 SDL_Surface *gpScreenReal = NULL; // 32-bit 转换后画布 (320x200)
 static SDL_Palette *gpPalette = NULL;
 
 volatile BOOL g_bRenderPaused = FALSE;
-static BOOL bScaleScreen = TRUE;
 
 // 震动参数
 static WORD g_wShakeTime = 0;
 static WORD g_wShakeLevel = 0;
+
+/* ════════════════════════════════════════════════════════════════════════
+ * Base64 & Kitty Graphics Protocol 核心渲染器
+ * ════════════════════════════════════════════════════════════════════════ */
+static size_t base64_encode(const uint8_t *in, size_t len, char *out) {
+  static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  char *p = out;
+  for (size_t i = 0; i < len; i += 3) {
+    uint32_t w = (in[i] << 16) | ((i + 1 < len ? in[i + 1] : 0) << 8) | ((i + 2 < len ? in[i + 2] : 0));
+    *p++ = b64[(w >> 18) & 0x3f];
+    *p++ = b64[(w >> 12) & 0x3f];
+    *p++ = (i + 1 < len) ? b64[(w >> 6) & 0x3f] : '=';
+    *p++ = (i + 2 < len) ? b64[w & 0x3f] : '=';
+  }
+  return p - out;
+}
+
+static struct {
+  long id;
+  int frame;
+  char b64[256005];
+  char proto[300000];
+} ctx;
+
+static void render_init() {
+  printf("\033[?25l\033[2J\033[H");
+  fflush(stdout);
+}
+
+static void render_done(long id) {
+  printf("\033_Ga=d,q=2,i=%ld;\033\\\033[H\033[2J\033[?25h", id);
+  fflush(stdout);
+}
+
+static void render_frame(const uint8_t *rgb) {
+  size_t b64_len = base64_encode(rgb, WIDTH * HEIGHT * 3, ctx.b64);
+  char *buf = ctx.proto;
+  size_t off = 0;
+
+  for (size_t i = 0; i < b64_len; i += 4096) {
+    int more = (i + 4096 < b64_len) ? 1 : 0;
+    size_t chunk = more ? 4096 : (b64_len - i);
+
+    if (i == 0) {
+      if (ctx.frame == 0)
+        // c=80 让图像占据终端的 80 列宽度进行缩放
+        off += sprintf(buf + off, "\033_Ga=T,i=%ld,f=24,s=%d,v=%d,q=2,c=80,m=%d;", ctx.id, WIDTH, HEIGHT, more);
+      else
+        off += sprintf(buf + off, "\033_Ga=f,r=1,i=%ld,f=24,q=2,s=%d,v=%d,m=%d;", ctx.id, WIDTH, HEIGHT, more);
+    } else {
+      if (ctx.frame == 0)
+        off += sprintf(buf + off, "\033_Gm=%d;", more);
+      else
+        off += sprintf(buf + off, "\033_Ga=f,r=1,q=2,m=%d;", more);
+    }
+
+    memcpy(buf + off, ctx.b64 + i, chunk);
+    off += chunk;
+    memcpy(buf + off, "\033\\", 2);
+    off += 2;
+  }
+
+  if (ctx.frame > 0)
+    off += sprintf(buf + off, "\033_Ga=a,q=2,c=1,i=%ld;\033\\", ctx.id);
+  else {
+    memcpy(buf + off, "\r\n", 2);
+    off += 2;
+  }
+
+  // 重置光标到左上角，防止画面滚动错位
+  off += sprintf(buf + off, "\033[H");
+
+  fwrite(ctx.proto, 1, off, stdout);
+  fflush(stdout);
+  ctx.frame++;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+ * 视频子系统接口重写
+ * ════════════════════════════════════════════════════════════════════════ */
 
 VOID VIDEO_CopySurface(SDL_Surface *s, const SDL_Rect *sr, SDL_Surface *t, const SDL_Rect *tr) {
   SDL_BlitSurface((s), (sr), (t), (tr));
@@ -58,35 +145,19 @@ INT VIDEO_FBPBlitToSurface(LPBYTE lpBitmapFBP, SDL_Surface *lpDstSurface) {
 }
 
 INT VIDEO_Startup(VOID) {
-  // 创建窗口
-  gpWindow = SDL_CreateWindow("Pal", gConfig.dwScreenWidth, gConfig.dwScreenHeight, SDL_WINDOW_RESIZABLE);
-  if (!gpWindow)
-    return -1;
+  // 1. 初始化终端显示环境
+  render_init();
+  srand((unsigned)time(NULL));
+  ctx.id = (long)rand() | 1;
+  ctx.frame = 0;
 
-  // 创建渲染器
-  gpRenderer = SDL_CreateRenderer(gpWindow, NULL);
-  if (!gpRenderer)
-    return -1;
-  // SDL_SetRenderVSync(gpRenderer, 1); // 开启 VSync
-
-  // 设置逻辑分辨率
-  SDL_SetRenderLogicalPresentation(gpRenderer, 320, 200, SDL_LOGICAL_PRESENTATION_LETTERBOX);
-
-  gpScreen = SDL_CreateSurface(320, 200, SDL_PIXELFORMAT_INDEX8);
-  gpScreenBak = SDL_CreateSurface(320, 200, SDL_PIXELFORMAT_INDEX8);
-  // 32-bit Surface 用于像素转换
-  gpScreenReal = SDL_CreateSurface(320, 200, SDL_PIXELFORMAT_XRGB8888);
-
-  // 创建纹理
-  gpTexture = SDL_CreateTexture(gpRenderer, SDL_PIXELFORMAT_XRGB8888, SDL_TEXTUREACCESS_STREAMING, 320, 200);
-
-  // 设置缩放质量
-  SDL_SetTextureScaleMode(gpTexture, SDL_SCALEMODE_NEAREST);
-
-  // 调色板
+  // 2. 初始化 SDL 面板 (用于内存渲染和特效处理)
+  gpScreen = SDL_CreateSurface(WIDTH, HEIGHT, SDL_PIXELFORMAT_INDEX8);
+  gpScreenBak = SDL_CreateSurface(WIDTH, HEIGHT, SDL_PIXELFORMAT_INDEX8);
+  gpScreenReal = SDL_CreateSurface(WIDTH, HEIGHT, SDL_PIXELFORMAT_XRGB8888);
   gpPalette = SDL_CreatePalette(256);
 
-  if (!gpScreen || !gpScreenBak || !gpScreenReal || !gpTexture || !gpPalette) {
+  if (!gpScreen || !gpScreenBak || !gpScreenReal || !gpPalette) {
     VIDEO_Shutdown();
     return -2;
   }
@@ -94,28 +165,52 @@ INT VIDEO_Startup(VOID) {
 }
 
 VOID VIDEO_Shutdown(VOID) {
-  SDL_DestroyTexture(gpTexture);
-  SDL_DestroySurface(gpScreen);
-  SDL_DestroySurface(gpScreenBak);
-  SDL_DestroySurface(gpScreenReal);
+  // 清理终端显示
+  render_done(ctx.id);
+
+  // 清理 SDL 内存
+  if (gpScreen)
+    SDL_DestroySurface(gpScreen);
+  if (gpScreenBak)
+    SDL_DestroySurface(gpScreenBak);
+  if (gpScreenReal)
+    SDL_DestroySurface(gpScreenReal);
   if (gpPalette)
     SDL_DestroyPalette(gpPalette);
-  SDL_DestroyRenderer(gpRenderer);
-  SDL_DestroyWindow(gpWindow);
 
-  gpTexture = NULL;
   gpScreen = NULL;
-  gpRenderer = NULL;
-  gpWindow = NULL;
+  gpScreenBak = NULL;
+  gpScreenReal = NULL;
+  gpPalette = NULL;
 }
 
 VOID VIDEO_RenderCopy(VOID) {
   if (g_bRenderPaused)
     return;
-  SDL_UpdateTexture(gpTexture, NULL, gpScreenReal->pixels, gpScreenReal->pitch);
-  SDL_RenderClear(gpRenderer);
-  SDL_RenderTexture(gpRenderer, gpTexture, NULL, NULL);
-  SDL_RenderPresent(gpRenderer);
+
+  // 锁定画布以安全读取像素
+  if (SDL_MUSTLOCK(gpScreenReal))
+    SDL_LockSurface(gpScreenReal);
+
+  static uint8_t rgb24[WIDTH * HEIGHT * 3];
+
+  // 将 SDL_PIXELFORMAT_XRGB8888 转换为 紧凑的 24-bit RGB
+  for (int y = 0; y < HEIGHT; y++) {
+    uint32_t *row = (uint32_t *)((uint8_t *)gpScreenReal->pixels + y * gpScreenReal->pitch);
+    for (int x = 0; x < WIDTH; x++) {
+      uint32_t pixel = row[x];
+      int idx = (y * WIDTH + x) * 3;
+      rgb24[idx + 0] = (pixel >> 16) & 0xFF; // R
+      rgb24[idx + 1] = (pixel >> 8) & 0xFF;  // G
+      rgb24[idx + 2] = pixel & 0xFF;         // B
+    }
+  }
+
+  if (SDL_MUSTLOCK(gpScreenReal))
+    SDL_UnlockSurface(gpScreenReal);
+
+  // 刷新到终端
+  render_frame(rgb24);
 }
 
 VOID VIDEO_UpdateScreen(const SDL_Rect *lpRect) {
@@ -131,7 +226,7 @@ VOID VIDEO_UpdateScreen(const SDL_Rect *lpRect) {
     else
       dst.y = g_wShakeLevel;
 
-    SDL_ClearSurface(gpScreenReal, 0, 0, 0, 0); // 清空背景
+    SDL_FillSurfaceRect(gpScreenReal, NULL, 0); // 清空背景
     SDL_BlitSurface(gpScreen, &src, gpScreenReal, &dst);
     g_wShakeTime--;
   } else {
@@ -151,17 +246,13 @@ VOID VIDEO_SetPalette(SDL_Color rgPalette[256]) {
 
 SDL_Color *VIDEO_GetPalette(VOID) { return gpPalette->colors; }
 
-VOID VIDEO_ToggleFullscreen(VOID) {
-  gConfig.fFullScreen = !gConfig.fFullScreen;
-  SDL_SetWindowFullscreen(gpWindow, gConfig.fFullScreen);
-}
+VOID VIDEO_ToggleFullscreen(VOID) { gConfig.fFullScreen = !gConfig.fFullScreen; }
 
 VOID VIDEO_ShakeScreen(WORD wShakeTime, WORD wShakeLevel) {
   g_wShakeTime = wShakeTime;
   g_wShakeLevel = wShakeLevel;
 }
 
-// switch the screen from gpScreenBak to gpScreen with effect
 VOID VIDEO_SwitchScreen(WORD wSpeed) {
   const int rgIndex[6] = {0, 3, 1, 5, 2, 4};
   wSpeed = (wSpeed + 1) * 10;
@@ -179,23 +270,11 @@ VOID VIDEO_SwitchScreen(WORD wSpeed) {
   }
 }
 
-// Fade from the backup screen buffer to the current screen buffer
 VOID VIDEO_FadeScreen(WORD wSpeed) {
   const int rgIndex[6] = {0, 3, 1, 5, 2, 4};
   SDL_Rect dstrect;
-  short offset = 240 - 200;
   short screenRealHeight = gpScreenReal->h;
   short screenRealY = 0;
-
-  if (SDL_MUSTLOCK(gpScreenReal)) {
-    if (!SDL_LockSurface(gpScreenReal))
-      return;
-  }
-
-  if (!bScaleScreen) {
-    screenRealHeight -= offset;
-    screenRealY = offset / 2;
-  }
 
   DWORD time = PAL_GetTicks();
 
@@ -211,34 +290,21 @@ VOID VIDEO_FadeScreen(WORD wSpeed) {
       }
       time = PAL_GetTicks() + wSpeed;
 
-      //
-      // Blend the pixels in the 2 buffers, and put the result into the
-      // backup buffer
-      //
       for (int k = rgIndex[j]; k < gpScreen->pitch * gpScreen->h; k += 6) {
         BYTE a = ((LPBYTE)(gpScreen->pixels))[k];
         BYTE b = ((LPBYTE)(gpScreenBak->pixels))[k];
 
         if (i > 0) {
-          if ((a & 0x0F) > (b & 0x0F)) {
+          if ((a & 0x0F) > (b & 0x0F))
             b++;
-          } else if ((a & 0x0F) < (b & 0x0F)) {
+          else if ((a & 0x0F) < (b & 0x0F))
             b--;
-          }
         }
-
         ((LPBYTE)(gpScreenBak->pixels))[k] = ((a & 0xF0) | (b & 0x0F));
       }
 
-      //
-      // Draw the backup buffer to the screen
-      //
       if (g_wShakeTime != 0) {
-        //
-        // Shake the screen
-        //
         SDL_Rect srcrect, dstrect;
-
         srcrect.x = 0;
         srcrect.y = 0;
         srcrect.w = 320;
@@ -249,23 +315,13 @@ VOID VIDEO_FadeScreen(WORD wSpeed) {
         dstrect.w = 320 * gpScreenReal->w / gpScreen->w;
         dstrect.h = (200 - g_wShakeLevel) * screenRealHeight / gpScreen->h;
 
-        if (g_wShakeTime & 1) {
+        if (g_wShakeTime & 1)
           srcrect.y = g_wShakeLevel;
-        } else {
+        else
           dstrect.y = (screenRealY + g_wShakeLevel) * screenRealHeight / gpScreen->h;
-        }
 
+        SDL_FillSurfaceRect(gpScreenReal, NULL, 0); // 清空背景
         SDL_BlitSurface(gpScreenBak, &srcrect, gpScreenReal, &dstrect);
-
-        if (g_wShakeTime & 1) {
-          dstrect.y = (screenRealY + screenRealHeight - g_wShakeLevel) * screenRealHeight / gpScreen->h;
-        } else {
-          dstrect.y = screenRealY;
-        }
-
-        dstrect.h = g_wShakeLevel * screenRealHeight / gpScreen->h;
-
-        SDL_FillSurfaceRect(gpScreenReal, &dstrect, 0);
         VIDEO_RenderCopy();
         g_wShakeTime--;
       } else {
@@ -279,18 +335,10 @@ VOID VIDEO_FadeScreen(WORD wSpeed) {
       }
     }
   }
-
-  if (SDL_MUSTLOCK(gpScreenReal)) {
-    SDL_UnlockSurface(gpScreenReal);
-  }
-
-  //
-  // Draw the result buffer to the screen as the final step
-  //
   VIDEO_UpdateScreen(NULL);
 }
 
-void VIDEO_SetWindowTitle(const char *pszTitle) { SDL_SetWindowTitle(gpWindow, pszTitle); }
+void VIDEO_SetWindowTitle(const char *pszTitle) { printf("\033]2;%s\033\\", pszTitle); }
 
 SDL_Surface *VIDEO_CreateCompatibleSurface(SDL_Surface *pSource) {
   return VIDEO_CreateCompatibleSizedSurface(pSource, NULL);
@@ -307,7 +355,6 @@ SDL_Surface *VIDEO_CreateCompatibleSizedSurface(SDL_Surface *pSource, const SDL_
 VOID VIDEO_DrawSurfaceToScreen(SDL_Surface *pSurface) {
   if (g_bRenderPaused)
     return;
-  // 自动缩放绘制到 Real 面板
   SDL_BlitSurfaceScaled(pSurface, NULL, gpScreenReal, NULL, SDL_SCALEMODE_LINEAR);
   VIDEO_RenderCopy();
 }
